@@ -15,11 +15,11 @@ Last updated: OpenStreetMap & Leaflet Integration, Tactical UI Redesign & Full F
 | **Team Management & Role Sanitization**| Complete and tested | Host, Runner, Chaser, Referee; role-based field sanitization (runner catch codes protected). |
 | **Individual Runner Head-Starts** | Complete and tested | Configurable per runner or global countdown; server-authoritative timer tracking. |
 | **OpenStreetMap & Leaflet Integration** | Complete and tested | Real OpenStreetMap raster tiles, standard attribution, high-contrast tactical DivIcons, accuracy radius circle, circular boundary, and touch-friendly recenter/zoom dock. Zero API keys required. |
-| **Browser Geolocation & Staleness** | Complete and tested | High accuracy GPS tracking, permission state handling (not requested, requesting, granted, denied), stale GPS amber alerts (>45s). |
+| **Browser Geolocation & Staleness** | Complete and tested | High accuracy GPS tracking, permission state handling (WAITING_FOR_PERMISSION, ACQUIRING_FIX, ACQUIRED, PERMISSION_DENIED, TIMEOUT, UNAVAILABLE), auto-centering on actual GPS lock, stale GPS amber alerts (>45s). |
 | **Dual Catch Validation Protocol** | Complete and tested | Proximity Tag (<25m with GPS accuracy tolerance) + Dynamic 4-digit Runner Catch Code with 3-attempt brute-force rate limiting. |
 | **Store-and-Listen Team Radio** | Complete and tested | Record audio with pre-send playback review and cancel, private team uploads, `LISTEN` / `IGNORE` controls, haptic vibration alerts, and auto-purge retention. |
 | **Emergency Safety Pause** | Complete and tested | Instant freeze control for Host and Referee, halts match timers, shows instructions, and disables catches. |
 | **Match Results & Rematch Flow** | Complete and tested | Highlights caught runners, tags log with verification type, winner declaration, back-to-lobby rematch loop. |
 | **Tactical Mobile-First Design System** | Complete and tested | Midnight dark surfaces (`#070b14`), electric green action accents (`#22c55e`), amber warnings, safe-area mobile insets, compact map HUD. |
-| **Automated Testing Suite** | Complete and tested | 14/14 Vitest unit and integration tests passing; Next.js 15 production build compiled with 0 errors. |
+| **Automated Testing Suite** | Complete and tested | 18/18 Vitest unit and integration tests passing; Next.js 15 production build compiled with 0 errors. |
 
