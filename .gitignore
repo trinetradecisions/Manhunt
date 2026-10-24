@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# Ephemeral uploads & logs
+uploads/audio/
+uploads/audio_test/
+*.log
+
+# Environment variables & local secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# System & OS
+.DS_Store
+Thumbs.db
