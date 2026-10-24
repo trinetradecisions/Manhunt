@@ -1,10 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { calculateHaversineDistance } from '../engine/geo.js';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const STATS_FILE = process.env.VERCEL
+const isServerless = Boolean(process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.VERCEL_REGION ||
+    process.env.NOW_REGION ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    (process.env.NODE_ENV === 'production' && !process.env.MANHUNT_STANDALONE));
+const STATS_FILE = isServerless
     ? path.join('/tmp', 'manhunt', 'data', 'player_stats.json')
     : path.join(__dirname, '../../data/player_stats.json');
 // GPS validation constraints

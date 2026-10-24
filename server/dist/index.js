@@ -17,7 +17,14 @@ const __dirname = path.dirname(__filename);
 import { VoiceService } from './services/voiceService.js';
 import { PlayerStatsService } from './services/playerStatsService.js';
 const PORT = process.env.PORT || 4000;
-const AUDIO_UPLOAD_DIR = process.env.VERCEL
+export const isServerless = Boolean(process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.VERCEL_REGION ||
+    process.env.NOW_REGION ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    (process.env.NODE_ENV === 'production' && !process.env.MANHUNT_STANDALONE));
+const AUDIO_UPLOAD_DIR = isServerless
     ? path.join('/tmp', 'manhunt', 'uploads', 'audio')
     : path.join(__dirname, '../uploads/audio');
 // Ensure upload directory exists safely (prevent crashing on read-only environments)
@@ -82,7 +89,15 @@ const upload = multer({
     storage,
     limits: { fileSize: 3 * 1024 * 1024 }, // 3MB limit
 });
-// Health check endpoint
+// Health check & root API info endpoints
+app.get('/', (req, res) => {
+    res.json({
+        status: 'online',
+        service: 'manhunt-backend',
+        version: '1.0.0',
+        timestamp: Date.now(),
+    });
+});
 app.get(['/health', '/api/health'], (req, res) => {
     res.json({
         status: 'healthy',
@@ -511,7 +526,7 @@ app.all(['/socket.io', '/socket.io/*'], (req, res) => {
         res.status(503).json({ error: 'Socket engine initializing' });
     }
 });
-if (!process.env.VERCEL) {
+if (!isServerless) {
     server.listen(PORT, () => {
         console.log(`[Manhunt Server] Running on http://localhost:${PORT}`);
     });
