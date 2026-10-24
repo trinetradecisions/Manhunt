@@ -1,2 +1,3 @@
-import handler from './index.js';
-export default handler;
+import app from './dist/index.js';
+
+export default app;
