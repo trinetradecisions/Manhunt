@@ -4,6 +4,7 @@ import {
   checkPlayZoneBoundary,
   validateCatchProximity,
   checkVelocitySanity,
+  validatePlayZone,
 } from '../src/engine/geo.js';
 
 describe('Geospatial Engine', () => {
@@ -89,5 +90,103 @@ describe('Geospatial Engine', () => {
     };
 
     expect(checkVelocitySanity(loc1, locTeleport)).toBe(false);
+  });
+
+  it('correctly evaluates rectangular boundary containment', () => {
+    const rectZone = {
+      shapeType: 'RECTANGLE' as const,
+      centerLat: 51.5050,
+      centerLng: -0.1250,
+      radiusMeters: 500,
+      northEast: { lat: 51.5100, lng: -0.1200 },
+      southWest: { lat: 51.5000, lng: -0.1300 },
+    };
+
+    const inside = checkPlayZoneBoundary({ latitude: 51.5050, longitude: -0.1250 }, rectZone);
+    expect(inside.isInside).toBe(true);
+
+    const outside = checkPlayZoneBoundary({ latitude: 51.5150, longitude: -0.1250 }, rectZone);
+    expect(outside.isInside).toBe(false);
+  });
+
+  it('correctly evaluates custom polygon boundary containment', () => {
+    // Triangle around central point
+    const polyZone = {
+      shapeType: 'POLYGON' as const,
+      centerLat: 51.5000,
+      centerLng: -0.1200,
+      radiusMeters: 500,
+      vertices: [
+        { lat: 51.5000, lng: -0.1300 },
+        { lat: 51.5100, lng: -0.1200 },
+        { lat: 51.5000, lng: -0.1100 },
+      ],
+    };
+
+    // Center-top inside triangle
+    const inside = checkPlayZoneBoundary({ latitude: 51.5030, longitude: -0.1200 }, polyZone);
+    expect(inside.isInside).toBe(true);
+
+    // Well outside triangle
+    const outside = checkPlayZoneBoundary({ latitude: 51.5150, longitude: -0.1200 }, polyZone);
+    expect(outside.isInside).toBe(false);
+  });
+
+  it('detects self-intersecting polygons and validates boundaries', () => {
+    // Self-intersecting bow-tie shape
+    const selfIntersecting = [
+      { lat: 51.5000, lng: -0.1300 },
+      { lat: 51.5100, lng: -0.1100 },
+      { lat: 51.5000, lng: -0.1100 },
+      { lat: 51.5100, lng: -0.1300 },
+    ];
+    const invalidResult = validatePlayZone({
+      shapeType: 'POLYGON',
+      centerLat: 51.5050,
+      centerLng: -0.1200,
+      radiusMeters: 500,
+      vertices: selfIntersecting,
+    });
+    expect(invalidResult.valid).toBe(false);
+    expect(invalidResult.error).toContain('self-intersects');
+
+    // Valid non-intersecting quadrilateral
+    const validQuad = [
+      { lat: 51.5000, lng: -0.1300 },
+      { lat: 51.5100, lng: -0.1300 },
+      { lat: 51.5100, lng: -0.1100 },
+      { lat: 51.5000, lng: -0.1100 },
+    ];
+    const validResult = validatePlayZone({
+      shapeType: 'POLYGON',
+      centerLat: 51.5050,
+      centerLng: -0.1200,
+      radiusMeters: 500,
+      vertices: validQuad,
+    });
+    expect(validResult.valid).toBe(true);
+    expect(validResult.areaSquareMeters).toBeGreaterThan(500);
+  });
+
+  it('rejects areas that are too small or excessively large', () => {
+    // Tiny circle radius 11m (area ~380m² < 500m²)
+    const tiny = validatePlayZone({
+      shapeType: 'CIRCLE',
+      centerLat: 51.5000,
+      centerLng: -0.1200,
+      radiusMeters: 11,
+    });
+    expect(tiny.valid).toBe(false);
+    expect(tiny.error).toContain('too small');
+
+    // Giant circle radius 4000m (area ~50km² > 25km²)
+    const giant = validatePlayZone({
+      shapeType: 'CIRCLE',
+      centerLat: 51.5000,
+      centerLng: -0.1200,
+      radiusMeters: 3500,
+    });
+    expect(giant.valid).toBe(false);
+    expect(giant.error).toContain('excessively large');
   });
 });

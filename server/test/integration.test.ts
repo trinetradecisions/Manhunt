@@ -239,6 +239,8 @@ describe('Full Stack Multiplayer Integration Test', () => {
     activeRoom.state = 'ACTIVE';
     // Reset runner caught state and generate code
     activeRoom.members['runner_user'].isCaught = false;
+    activeRoom.members['runner_user'].team = 'RUNNERS';
+    activeRoom.members['runner_user'].role = 'RUNNER';
     activeRoom.members['runner_user'].catchCode = '7429';
 
     // 1. Wrong code test

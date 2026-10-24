@@ -4,9 +4,12 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { PlayerLocation } from '../types/game';
 
 export type ExtendedGpsStatus =
+  | 'NOT_ENABLED'
+  | 'INSECURE_CONTEXT'
   | 'WAITING_FOR_PERMISSION'
   | 'ACQUIRING_FIX'
   | 'ACQUIRED'
+  | 'WEAK_SIGNAL'
   | 'PERMISSION_DENIED'
   | 'POSITION_UNAVAILABLE'
   | 'TIMEOUT'
@@ -29,23 +32,29 @@ export interface OneShotGpsDiagnostics {
 interface UseGeolocationOptions {
   onLocationUpdate?: (location: PlayerLocation) => void;
   stalenessThresholdSeconds?: number;
+  autoStart?: boolean;
 }
 
 export function useGeolocation({
   onLocationUpdate,
   stalenessThresholdSeconds = 45,
+  autoStart = false,
 }: UseGeolocationOptions = {}) {
   const [location, setLocation] = useState<PlayerLocation | null>(null);
-  const [gpsStatus, setGpsStatus] = useState<ExtendedGpsStatus>('WAITING_FOR_PERMISSION');
+  const [gpsStatus, setGpsStatus] = useState<ExtendedGpsStatus>('NOT_ENABLED');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<number | null>(null);
   const [isStale, setIsStale] = useState<boolean>(false);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [lastFixTimestamp, setLastFixTimestamp] = useState<number | null>(null);
   const [browserPermissionState, setBrowserPermissionState] = useState<string>('unknown');
+  const [isSecure, setIsSecure] = useState<boolean>(true);
 
   const lastUpdateRef = useRef<number>(0);
   const watchIdRef = useRef<number | null>(null);
+  const isStartedRef = useRef<boolean>(false);
 
-  // Store callback in ref to prevent infinite re-render / watchPosition cancellation loop
+  // Store callback in ref to prevent infinite re-render loops
   const onLocationUpdateRef = useRef(onLocationUpdate);
   onLocationUpdateRef.current = onLocationUpdate;
 
@@ -64,21 +73,43 @@ export function useGeolocation({
     errorMessage: null,
   });
 
+  // Verify secure context on client mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const secure = window.isSecureContext ?? (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      setIsSecure(secure);
+      if (!secure) {
+        setGpsStatus('INSECURE_CONTEXT');
+        setErrorMessage(
+          'Mobile browsers require a Secure Context (HTTPS) for GPS access. When testing over LAN, access via HTTPS or configure browser flags.'
+        );
+      }
+    }
+  }, []);
+
   const handleSuccess = useCallback((pos: GeolocationPosition) => {
     const now = Date.now();
     lastUpdateRef.current = now;
+    const reportedAccuracy = Math.round(pos.coords.accuracy * 10) / 10;
 
     const playerLoc: PlayerLocation = {
       latitude: pos.coords.latitude,
       longitude: pos.coords.longitude,
-      accuracy: Math.round(pos.coords.accuracy * 10) / 10,
+      accuracy: reportedAccuracy,
       heading: pos.coords.heading,
       speed: pos.coords.speed,
       timestamp: now,
     };
 
     setLocation(playerLoc);
-    setGpsStatus('ACQUIRED');
+    setAccuracy(reportedAccuracy);
+    setLastFixTimestamp(now);
+    // Distinguish between high accuracy and weak signal (> 25m)
+    if (reportedAccuracy > 25) {
+      setGpsStatus('WEAK_SIGNAL');
+    } else {
+      setGpsStatus('ACQUIRED');
+    }
     setErrorMessage(null);
     setErrorCode(null);
     setIsStale(false);
@@ -94,30 +125,53 @@ export function useGeolocation({
       case err.PERMISSION_DENIED:
         setGpsStatus('PERMISSION_DENIED');
         setErrorMessage(
-          err.message || 'Location permission denied. Please allow location access in your browser settings.'
+          'Location permission denied. Please allow location access in your browser and operating system settings.'
         );
         break;
       case err.POSITION_UNAVAILABLE:
         setGpsStatus('POSITION_UNAVAILABLE');
         setErrorMessage(
-          err.message || 'GPS position unavailable. Ensure device location services/GPS are enabled.'
+          'GPS position unavailable. Ensure device location / GPS hardware is turned on and you have a clear view of the sky.'
         );
         break;
       case err.TIMEOUT:
         setGpsStatus('TIMEOUT');
         setErrorMessage(
-          err.message || 'GPS location request timed out. Attempting satellite signal acquisition...'
+          'GPS fix timed out. Acquiring satellite lock; move outdoors or near a window...'
         );
         break;
       default:
         setGpsStatus('POSITION_UNAVAILABLE');
-        setErrorMessage(err.message || 'Unknown geolocation error.');
+        setErrorMessage(err.message || 'Unknown GPS error.');
     }
   }, []);
 
-  // Explicit one-shot call to navigator.geolocation.getCurrentPosition()
+  // One-shot explicit request
   const requestOneShotGps = useCallback(() => {
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+    if (typeof window === 'undefined') return;
+
+    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      setGpsStatus('INSECURE_CONTEXT');
+      setErrorMessage('HTTPS connection required for mobile GPS.');
+      setOneShotGps({
+        status: 'ERROR',
+        latitude: null,
+        longitude: null,
+        accuracy: null,
+        altitude: null,
+        heading: null,
+        speed: null,
+        timestamp: Date.now(),
+        errorCode: 1,
+        errorName: 'INSECURE_CONTEXT',
+        errorMessage: 'Geolocation is restricted to Secure Contexts (HTTPS).',
+      });
+      return;
+    }
+
+    if (!('geolocation' in navigator)) {
+      setGpsStatus('UNSUPPORTED');
+      setErrorMessage('Geolocation API is not supported in this browser.');
       setOneShotGps({
         status: 'ERROR',
         latitude: null,
@@ -129,9 +183,8 @@ export function useGeolocation({
         timestamp: Date.now(),
         errorCode: 0,
         errorName: 'UNSUPPORTED',
-        errorMessage: 'Geolocation API is not supported in this browser.',
+        errorMessage: 'Geolocation API is not supported.',
       });
-      setGpsStatus('UNSUPPORTED');
       return;
     }
 
@@ -152,8 +205,6 @@ export function useGeolocation({
           errorName: null,
           errorMessage: null,
         });
-
-        // Also update player location
         handleSuccess(pos);
       },
       (err: GeolocationPositionError) => {
@@ -175,24 +226,37 @@ export function useGeolocation({
           errorName,
           errorMessage: err.message || errorName,
         });
-
         handleError(err);
       },
       {
         enableHighAccuracy: true,
         timeout: 15000,
-        maximumAge: 0, // Force fresh hardware reading
+        maximumAge: 0,
       }
     );
   }, [handleSuccess, handleError]);
 
-  // Start continuous watching without teardown loops
-  const startWatching = useCallback(() => {
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+  // User-initiated or game-initiated continuous tracking
+  const requestLocationAccess = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      setGpsStatus('INSECURE_CONTEXT');
+      setErrorMessage(
+        'Geolocation is blocked on insecure HTTP over LAN. Open the app via HTTPS (e.g. dev:https) to enable mobile GPS.'
+      );
+      return;
+    }
+
+    if (!('geolocation' in navigator)) {
       setGpsStatus('UNSUPPORTED');
       setErrorMessage('Geolocation is not supported by your browser.');
       return;
     }
+
+    isStartedRef.current = true;
+    setGpsStatus('ACQUIRING_FIX');
+    setErrorMessage(null);
 
     // Check browser permission status if supported
     if ('permissions' in navigator && navigator.permissions?.query) {
@@ -203,8 +267,6 @@ export function useGeolocation({
           if (permissionStatus.state === 'denied') {
             setGpsStatus('PERMISSION_DENIED');
             setErrorMessage('Location permission is blocked in browser settings for this site.');
-          } else if (permissionStatus.state === 'granted') {
-            setGpsStatus((prev) => (prev === 'ACQUIRED' ? 'ACQUIRED' : 'ACQUIRING_FIX'));
           } else if (permissionStatus.state === 'prompt') {
             setGpsStatus('WAITING_FOR_PERMISSION');
           }
@@ -216,24 +278,21 @@ export function useGeolocation({
               setErrorMessage('Location permission was denied in browser settings.');
             } else if (permissionStatus.state === 'granted') {
               setGpsStatus((prev) => (prev === 'ACQUIRED' ? 'ACQUIRED' : 'ACQUIRING_FIX'));
-              // Immediately request position once permission is granted
               requestOneShotGps();
             }
           };
         })
-        .catch(() => {
-          // Ignore permissions query errors on browsers that don't support it
-        });
+        .catch(() => {});
     }
 
-    // Call getCurrentPosition first for fast initial position lock
+    // Call getCurrentPosition first for rapid fix
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         handleSuccess(pos);
       },
       (err) => {
-        // If high-accuracy timed out on initial request, retry once with standard accuracy
         if (err.code === err.TIMEOUT) {
+          // Retry once with standard accuracy if high accuracy timed out initially
           navigator.geolocation.getCurrentPosition(
             handleSuccess,
             handleError,
@@ -245,14 +304,15 @@ export function useGeolocation({
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 5000,
+        timeout: 12000,
+        maximumAge: 3000,
       }
     );
 
-    // Clear existing watch if any
+    // Clear existing watch if any to prevent duplicate watchers
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
     }
 
     // Start continuous watchPosition
@@ -262,14 +322,27 @@ export function useGeolocation({
       {
         enableHighAccuracy: true,
         timeout: 20000,
-        maximumAge: 5000,
+        maximumAge: 4000,
       }
     );
   }, [handleSuccess, handleError, requestOneShotGps]);
 
-  // Mount effect: Starts watching once on mount and manages staleness
+  // Clean stop for when user leaves room or match ends
+  const stopLocationAccess = useCallback(() => {
+    isStartedRef.current = false;
+    if (watchIdRef.current !== null && typeof window !== 'undefined' && 'geolocation' in navigator) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setGpsStatus('NOT_ENABLED');
+    setLocation(null);
+  }, []);
+
+  // Mount effect: start if autoStart requested, and manage staleness timer
   useEffect(() => {
-    startWatching();
+    if (autoStart) {
+      requestLocationAccess();
+    }
 
     const staleInterval = setInterval(() => {
       if (lastUpdateRef.current > 0) {
@@ -289,7 +362,7 @@ export function useGeolocation({
       }
       clearInterval(staleInterval);
     };
-  }, [startWatching, stalenessThresholdSeconds]);
+  }, [autoStart, requestLocationAccess, stalenessThresholdSeconds]);
 
   return {
     location,
@@ -297,9 +370,14 @@ export function useGeolocation({
     errorMessage,
     errorCode,
     isStale,
+    accuracy,
+    lastFixTimestamp,
     browserPermissionState,
+    isSecureContext: isSecure,
     oneShotGps,
     requestOneShotGps,
-    refreshGps: startWatching,
+    requestLocationAccess,
+    stopLocationAccess,
+    refreshGps: requestLocationAccess,
   };
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { Trophy, Flag, RotateCcw, ShieldCheck, CheckCircle2, Clock, Users } from 'lucide-react';
 import { RoomState } from '../types/game';
 
 interface MatchResultsModalProps {
@@ -19,68 +20,117 @@ export default function MatchResultsModal({
 
   const isRunnerVictory = winner === 'RUNNERS';
 
+  const totalRunners = Object.values(roomState.members).filter(
+    (m) => m.team === 'RUNNERS'
+  ).length;
+  const caughtRunners = Object.values(roomState.members).filter(
+    (m) => m.team === 'RUNNERS' && m.isCaught
+  ).length;
+  const survivedCount = Math.max(0, totalRunners - caughtRunners);
+
   return (
-    <div className="fixed inset-0 z-[800] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-surface border border-neutral-700 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl space-y-5">
+    <div className="fixed inset-0 z-[800] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
+      <div className="bg-[#1F2731] border border-[#3B4652] w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl space-y-4">
+        {/* Victory Icon and Banner */}
         <div className="space-y-2">
-          <span className="text-4xl">{isRunnerVictory ? '🏃‍♂️' : '🎯'}</span>
-          <h2
-            className={`text-2xl font-black uppercase tracking-tight ${
-              isRunnerVictory ? 'text-tactical-runner' : 'text-tactical-chaser'
+          <div
+            className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center border shadow-lg ${
+              isRunnerVictory
+                ? 'bg-[#39BDE8]/20 border-[#39BDE8]/60 text-[#39BDE8]'
+                : 'bg-[#FF4655]/20 border-[#FF4655]/60 text-[#FF4655]'
             }`}
           >
-            {isRunnerVictory ? 'RUNNERS SURVIVED!' : 'CHASERS VICTORIOUS!'}
+            {isRunnerVictory ? (
+              <Flag className="w-8 h-8" />
+            ) : (
+              <Trophy className="w-8 h-8" />
+            )}
+          </div>
+
+          <h2
+            className={`text-2xl font-black font-mono uppercase tracking-tight ${
+              isRunnerVictory ? 'text-[#39BDE8]' : 'text-[#FF4655]'
+            }`}
+          >
+            {isRunnerVictory ? 'RUNNERS SURVIVED' : 'CHASERS VICTORIOUS'}
           </h2>
-          <p className="text-xs text-neutral-400">
+
+          <p className="text-xs text-[#A8B0BA] leading-relaxed">
             {isRunnerVictory
-              ? 'At least one runner evaded capture until the match clock expired.'
-              : 'All runners were hunted down before time ran out.'}
+              ? `${survivedCount} runner(s) evaded capture until the match clock expired.`
+              : 'All runners were hunted down before the clock expired.'}
           </p>
         </div>
 
-        {/* Catches Highlights */}
-        <div className="bg-surface-elevated/70 border border-neutral-800 rounded-2xl p-4 text-left space-y-2 max-h-48 overflow-y-auto">
-          <h4 className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
-            Match Highlights ({catches.length} Verified Tags)
+        {/* Quick Tactical Stats Grid */}
+        <div className="grid grid-cols-2 gap-2 text-left">
+          <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
+            <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
+              Tags Confirmed
+            </span>
+            <span className="text-base font-black font-mono text-white">
+              {catches.length} / {totalRunners}
+            </span>
+          </div>
+          <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
+            <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
+              Survivors
+            </span>
+            <span className="text-base font-black font-mono text-[#39BDE8]">
+              {survivedCount} Operative(s)
+            </span>
+          </div>
+        </div>
+
+        {/* Catches Highlights Log */}
+        <div className="bg-[#293440] border border-[#3B4652] rounded-2xl p-3.5 text-left space-y-2 max-h-48 overflow-y-auto">
+          <h4 className="text-[10px] font-bold uppercase font-mono tracking-wider text-[#A8B0BA] mb-1 flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#4CC38A]" />
+            <span>Verified Catch Log ({catches.length})</span>
           </h4>
           {catches.length === 0 ? (
-            <p className="text-xs text-neutral-500 italic">No runners were caught!</p>
+            <p className="text-xs text-[#A8B0BA] italic py-1">No runners were tagged this match.</p>
           ) : (
             catches.map((c, i) => (
               <div
                 key={i}
-                className="text-xs flex items-center justify-between py-1.5 border-b border-neutral-800/60 last:border-0"
+                className="text-xs flex items-center justify-between py-2 border-b border-[#3B4652] last:border-0"
               >
                 <div>
-                  <span className="text-neutral-200 font-semibold">
-                    <span className="text-tactical-chaser">{c.chaserNickname}</span> tagged{' '}
-                    <span className="text-tactical-runner">{c.runnerNickname}</span>
-                  </span>
-                  <span className="block text-[10px] text-neutral-400">
-                    {c.verificationType === 'CODE_VERIFIED'
-                      ? 'PIN Code Verified'
-                      : c.verificationType === 'REFEREE_OVERRIDE'
-                      ? 'Referee Override'
-                      : `${c.distanceMeters}m proximity tag`}
-                  </span>
+                  <div className="text-[#ECE8E1] font-semibold flex items-center gap-1">
+                    <span className="text-[#FF4655] font-bold">{c.chaserNickname}</span>
+                    <span className="text-neutral-500 text-[10px]">&rarr;</span>
+                    <span className="text-[#39BDE8] font-bold">{c.runnerNickname}</span>
+                  </div>
+                  <div className="text-[10px] text-[#A8B0BA] font-mono flex items-center gap-2 mt-0.5">
+                    <span>Dist: {Math.round(c.distanceMeters)}m</span>
+                    {c.verificationType === 'CODE_VERIFIED' && (
+                      <span className="text-[#39BDE8] font-bold">[PIN Verified]</span>
+                    )}
+                    {c.verificationType === 'PROXIMITY_CONFIRMED' && (
+                      <span className="text-[#4CC38A] font-bold">[GPS Confirmed]</span>
+                    )}
+                  </div>
                 </div>
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#4CC38A] shrink-0" />
               </div>
             ))
           )}
         </div>
 
         {/* Rematch Controls */}
-        <div className="pt-2">
+        <div className="pt-1">
           {isHost ? (
             <button
               onClick={onRematch}
-              className="w-full py-3.5 bg-tactical-chaser hover:brightness-110 active:scale-95 text-neutral-950 font-black rounded-2xl text-xs uppercase tracking-wider shadow-tactical-glow transition-all"
+              className="w-full min-h-[48px] py-3.5 bg-[#FF4655] hover:brightness-110 active:scale-95 text-white font-black rounded-2xl text-xs uppercase tracking-wider shadow-tactical-glow transition-all flex items-center justify-center gap-2"
             >
-              🔄 Rematch (Back to Lobby)
+              <RotateCcw className="w-4 h-4" />
+              <span>Rematch (Return to Staging)</span>
             </button>
           ) : (
-            <p className="text-xs text-neutral-500 italic">
-              Waiting for Host to initiate rematch...
+            <p className="text-xs text-[#A8B0BA] italic py-2">
+              Awaiting Host to initiate rematch...
             </p>
           )}
         </div>

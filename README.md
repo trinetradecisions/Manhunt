@@ -90,6 +90,50 @@ npm run build
 
 ---
 
+## 🚀 Production Deployment & Hosting Guide
+
+### Architecture Overview
+- **Client (Frontend)**: Next.js 15 (React 19 / TypeScript / Tailwind CSS / Leaflet). Fully static & SSR compatible, ideal for deployment on **Vercel**, Cloudflare Pages, or Netlify.
+  - Requires **HTTPS** in production for browser Geolocation API (`navigator.geolocation`) and MediaDevices (`navigator.mediaDevices.getUserMedia`).
+  - Configure `NEXT_PUBLIC_SOCKET_URL` pointing to your deployed backend origin.
+- **Server (Backend)**: Node.js (Express / Socket.IO / WebRTC Signaling / In-Memory Match Loops).
+  - Requires a persistent Node.js environment with long-lived WebSocket support, such as **Render**, **Railway**, **Fly.io**, **AWS ECS/EC2**, or **DigitalOcean App Platform**.
+  - **Important**: Do not deploy the backend as serverless functions (e.g. AWS Lambda / Vercel Serverless) as match timers, radar loops, and WebSocket connections require a persistent process.
+  - Health check endpoint available at `/health` and `/api/health`.
+
+### Environment Variables
+
+#### Client (`client/.env.production`)
+```env
+NEXT_PUBLIC_SOCKET_URL=https://api.yourdomain.com
+NEXT_PUBLIC_MAP_TILE_URL=https://tile.openstreetmap.org/{z}/{x}/{y}.png
+# Optional WebRTC STUN/TURN (defaults to Google Public STUN)
+NEXT_PUBLIC_STUN_URL=stun:stun.l.google.com:19302
+# NEXT_PUBLIC_TURN_URL=turn:turn.yourdomain.com:3478
+# NEXT_PUBLIC_TURN_USERNAME=username
+# NEXT_PUBLIC_TURN_CREDENTIAL=password
+```
+
+#### Server (`server/.env.production`)
+```env
+PORT=4000
+NODE_ENV=production
+CORS_ORIGIN=https://manhunt.yourdomain.com
+MAX_AUDIO_SIZE_BYTES=5242880
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX_REQUESTS=120
+```
+
+### Game Scoring & Match Lifecycle
+- **Authoritative Server Validation**: All catches, GPS distances, mission completions, and team points are validated on the server.
+- **Winning Team Bonus**: **+500 points** awarded to the victorious team exactly once upon match termination.
+- **Individual Winner Bonus**: **+100 points** awarded to each player on the winning squad.
+- **Catch Scoring**: Verified catch awards +100 individual points to the chaser and +100 team points to the Chasers team.
+- **Catch Security**: 4-digit expiring dynamic catch codes with GPS proximity verification (<25m), anti-replay guards, and rate limits.
+- **State Durability**: Active match rooms run in-memory for zero-latency multiplayer sync. Long-term player records and dossiers are saved locally in `server/data/player_stats.json`. (Note: Server process restarts will terminate active in-memory matches; players can re-join new lobbies immediately).
+
+---
+
 ## 📚 Complete Project Documentation
 - [Evidence Ledger](file:///C:/Users/chanu/Projects/Manhunt/docs/evidence-ledger.md)
 - [Competitor Research](file:///C:/Users/chanu/Projects/Manhunt/docs/competitor-research.md)
@@ -105,3 +149,4 @@ npm run build
 - [Database Schema](file:///C:/Users/chanu/Projects/Manhunt/docs/database-schema.md)
 - [Test Plan](file:///C:/Users/chanu/Projects/Manhunt/docs/test-plan.md)
 - [Implementation Status](file:///C:/Users/chanu/Projects/Manhunt/docs/implementation-status.md)
+

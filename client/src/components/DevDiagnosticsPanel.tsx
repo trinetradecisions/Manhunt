@@ -1,6 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import {
+  Terminal,
+  Activity,
+  Satellite,
+  Zap,
+  Lock,
+  AlertTriangle,
+  X,
+} from 'lucide-react';
 import { OneShotGpsDiagnostics, ExtendedGpsStatus } from '../hooks/useGeolocation';
 import { SocketDiagnostics } from '../hooks/useSocket';
 import { PlayerLocation } from '../types/game';
@@ -94,9 +103,10 @@ export default function DevDiagnosticsPanel({
               }`}
             />
           </span>
-          <span>🛠️ DEV DIAGNOSTICS</span>
+          <Terminal className="w-3.5 h-3.5 text-amber-400" />
+          <span>DEV DIAGNOSTICS</span>
           <span className="text-[10px] bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-400">
-            {isOpen ? 'CLOSE ✕' : 'INSPECT'}
+            {isOpen ? 'CLOSE' : 'INSPECT'}
           </span>
         </button>
       </div>
@@ -117,7 +127,7 @@ export default function DevDiagnosticsPanel({
                 onClick={() => setIsOpen(false)}
                 className="w-7 h-7 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white flex items-center justify-center text-xs font-bold"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
@@ -127,7 +137,7 @@ export default function DevDiagnosticsPanel({
               <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-neutral-800/80 pb-2">
                   <div className="flex items-center gap-2 font-bold text-neutral-100">
-                    <span>📡</span>
+                    <Satellite className="w-4 h-4 text-emerald-400" />
                     <span>GPS & Geolocation Diagnostics</span>
                   </div>
                   <button
@@ -142,9 +152,9 @@ export default function DevDiagnosticsPanel({
                 </div>
 
                 {/* Notice regarding coordinate integrity */}
-                <div className="text-[10px] bg-neutral-950 p-2 rounded-lg border border-neutral-800/80 text-neutral-400 leading-relaxed">
-                  🔒 <strong>Integrity Guarantee:</strong> Only authentic hardware GPS readings are
-                  reported. Default map centers and simulated coordinates are strictly prohibited.
+                <div className="text-[10px] bg-neutral-950 p-2 rounded-lg border border-neutral-800/80 text-neutral-400 leading-relaxed flex items-start gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                  <span><strong>Integrity Guarantee:</strong> Only authentic hardware GPS readings are reported. Default map centers and simulated coordinates are strictly prohibited.</span>
                 </div>
 
                 {/* Raw one-shot GPS details */}
@@ -250,8 +260,9 @@ export default function DevDiagnosticsPanel({
                 {/* Errors if any */}
                 {(oneShotGps.errorMessage || gpsErrorMessage) && (
                   <div className="bg-red-950/60 border border-red-500/50 p-2.5 rounded-xl text-red-300 text-[11px] space-y-1">
-                    <div className="font-bold text-red-200">
-                      ⚠️ Geolocation Error {oneShotGps.errorCode ? `(Code ${oneShotGps.errorCode}: ${oneShotGps.errorName})` : ''}
+                    <div className="font-bold text-red-200 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                      <span>Geolocation Error {oneShotGps.errorCode ? `(Code ${oneShotGps.errorCode}: ${oneShotGps.errorName})` : ''}</span>
                     </div>
                     <div>{oneShotGps.errorMessage || gpsErrorMessage}</div>
                   </div>
@@ -262,7 +273,7 @@ export default function DevDiagnosticsPanel({
               <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-neutral-800/80 pb-2">
                   <div className="flex items-center gap-2 font-bold text-neutral-100">
-                    <span>⚡</span>
+                    <Zap className="w-4 h-4 text-amber-400" />
                     <span>Socket.IO Connection Diagnostics</span>
                   </div>
                   <div className="flex items-center gap-2">

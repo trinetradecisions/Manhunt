@@ -15,10 +15,43 @@ export type GameMode = 'CLASSIC_MANHUNT' | 'HIDE_AND_SEEK';
 
 export type GpsPermissionStatus = 'GRANTED' | 'DENIED' | 'PROMPT' | 'UNAVAILABLE';
 
+export type PlayBoundaryShape = 'CIRCLE' | 'RECTANGLE' | 'POLYGON';
+
+export interface MapPoint {
+  lat: number;
+  lng: number;
+  latitude?: number;
+  longitude?: number;
+}
+
+export type TacticalMarkerType =
+  | 'START_POINT'
+  | 'SAFE_ZONE'
+  | 'MEETING_POINT'
+  | 'CUSTOM';
+
+export interface TacticalMarker {
+  id: string;
+  lat: number;
+  lng: number;
+  label: string;
+  type: TacticalMarkerType;
+}
+
 export interface PlayZone {
-  centerLat: number;
+  shapeType?: PlayBoundaryShape; // 'CIRCLE' (default) | 'RECTANGLE' | 'POLYGON'
+  centerLat: number; // Anchor or centroid for map centering
   centerLng: number;
-  radiusMeters: number;
+  radiusMeters: number; // Circle radius or enclosing radius
+  northEast?: MapPoint; // Rectangle top-right
+  southWest?: MapPoint; // Rectangle bottom-left
+  vertices?: MapPoint[]; // Polygon boundary vertices
+  markers?: TacticalMarker[]; // Named points of interest
+  areaSquareMeters?: number; // Approximate calculated area
+  perimeterMeters?: number; // Approximate calculated perimeter
+  version?: number; // Monotonically increasing revision number
+  updatedAt?: number;
+  updatedBy?: string;
 }
 
 export interface PlayerLocation {
@@ -41,8 +74,150 @@ export interface PlayerMember {
   lastLocation?: PlayerLocation;
   isCaught?: boolean;
   caughtAt?: number;
+  isEliminated?: boolean;
   individualHeadStartSeconds?: number;
   catchCode?: string; // 4-digit code generated for runner
+  catchCodeExpiresAt?: number;
+}
+
+export type MissionTemplateType =
+  | 'SECURE_POINT'
+  | 'SECURE_THE_POINT'
+  | 'CHECKPOINT_RUN'
+  | 'SURVIVAL_MILESTONE'
+  | 'CLOSE_ENCOUNTER'
+  | 'LANDMARK_RECON';
+
+export type MissionDifficulty = 'EASY' | 'MEDIUM' | 'HARD';
+
+export type MissionStatus = 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'PAUSED';
+
+export interface MissionCheckpoint {
+  id?: string;
+  index: number;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  completed: boolean;
+  isCompleted?: boolean;
+  completedAt?: number;
+}
+
+export interface ActiveMission {
+  id: string;
+  playerId: string;
+  playerNickname: string;
+  roomCode: string;
+  matchId?: string;
+  type?: string;
+  templateType: MissionTemplateType;
+  title: string;
+  description: string;
+  difficulty: MissionDifficulty;
+  rewardIndividual: number;
+  rewardTeam: number;
+  assignedAt: number;
+  deadlineAt: number | null;
+  targetLocation?: MapPoint;
+  targetRadiusMeters?: number;
+  requiredStaySeconds?: number;
+  currentStaySeconds?: number;
+  stayDurationSeconds?: number;
+  stayResetOnDeparture?: boolean;
+  isInRadius?: boolean;
+  progress?: number;
+  proximityDistanceMeters?: number;
+  milestoneMinutes?: number;
+  milestoneAwardedCount?: number;
+  checkpoints?: MissionCheckpoint[];
+  currentCheckpointIndex?: number;
+  landmarkClue?: {
+    question?: string;
+    answer?: string;
+    isAnswered?: boolean;
+    name?: string;
+  };
+  status: MissionStatus;
+  completedAt?: number;
+  distanceToTargetMeters?: number;
+}
+
+export interface ScoreEvent {
+  id: string;
+  timestamp: number;
+  type:
+    | 'MISSION_COMPLETED'
+    | 'CATCH_AWARD'
+    | 'SURVIVAL_MILESTONE'
+    | 'WINNING_BONUS'
+    | 'INTERCEPTION'
+    | 'CHASER_MILESTONE';
+  playerId?: string;
+  playerNickname?: string;
+  team: PlayerTeam;
+  pointsIndividual: number;
+  pointsTeam: number;
+  reason: string;
+  idempotencyKey: string;
+}
+
+export interface ScoreLedger {
+  teamScores: {
+    RUNNERS: number;
+    CHASERS: number;
+  };
+  playerScores: Record<string, number>;
+  individualScores?: Record<string, number>;
+  events: ScoreEvent[];
+}
+
+export type CaughtRunnerRule = 'CONVERT_TO_CHASER' | 'ELIMINATE';
+export type TieBreakerRule = 'DRAW' | 'MOST_CATCHES' | 'MOST_MISSIONS';
+
+export interface MissionsConfig {
+  enabled: boolean;
+  enabledMissionTypes: MissionTemplateType[];
+  enabledTypes?: string[];
+  difficultyWeights: {
+    easy: number;
+    medium: number;
+    hard: number;
+  };
+  rewards: {
+    securePoint: { individual: number; team: number };
+    checkpointRun: { individual: number; team: number };
+    survivalMilestone: { individual: number; team: number };
+    closeEncounter: { individual: number; team: number };
+    landmarkRecon: { individual: number; team: number };
+  };
+  securePointRadiusMeters: number;
+  securePointDurationSeconds: number;
+  securePointLeaveBehavior: 'RESET' | 'PAUSE';
+  checkpointCount: number;
+  checkpointDeadlineSeconds: number;
+  survivalMilestoneSeconds: number;
+  closeEncounterDistanceMeters: number;
+  closeEncounterDurationSeconds: number;
+  landmarkRadiusMeters: number;
+  catchCodeExpirySeconds: number;
+  catchRequiresGpsProximity: boolean;
+  catchRadiusMeters?: number;
+  catchGpsFreshnessSeconds: number;
+  caughtRunnerRule: CaughtRunnerRule;
+  catchReward: { individual: number; team: number };
+  winningTeamBonus: number;
+  winningIndividualBonus: number;
+  earlyEndAllRunnersCaught: boolean;
+  allRunnersCaughtEndsMatch?: boolean;
+  tieBreakerRule: TieBreakerRule;
+  tieBreaker?: TieBreakerRule;
+  // Optional Chaser Gameplay Objectives
+  chaserObjectivesEnabled?: boolean;
+  rewardInterception?: { individual: number; team: number };
+  rewardChaserMilestone?: { individual: number; team: number };
+  chaserMilestoneSeconds?: number;
+  rewardCatchIndividual?: number;
+  rewardCatchTeam?: number;
 }
 
 export interface GameConfig {
@@ -50,10 +225,58 @@ export interface GameConfig {
   durationSeconds: number; // default 900 (15 min)
   playZone: PlayZone;
   pingIntervalSeconds: number; // default 60s
+  runnerSnapshotIntervalSeconds: number; // default 120s for server-scheduled chaser intel
   globalHeadStartSeconds: number; // default 120s (2 min)
   individualHeadStarts?: Record<string, number>; // playerId -> custom seconds
+  targetChaserCount: number; // host-configured desired chasers (default 1)
   radioEnabled: boolean;
   catchProximityThresholdMeters: number; // default 25m
+  dynamicZone?: DynamicZoneConfig;
+  missions?: MissionsConfig;
+}
+
+export interface DynamicZoneConfig {
+  enabled: boolean;
+  initialRadiusMeters: number;
+  shrinkIntervalSeconds: number;
+  shrinkPercentage: number;
+  minRadiusMeters: number;
+  initialDelaySeconds: number;
+  warningDurationSeconds: number;
+}
+
+export interface DynamicZoneState {
+  currentRadiusMeters: number;
+  nextRadiusMeters: number;
+  currentPhase: number;
+  nextShrinkAt: number;
+  warningAt: number;
+  isWarningActive: boolean;
+  isFinalZone: boolean;
+}
+
+export interface MatchHistoryRecord {
+  matchId: string;
+  roomCode: string;
+  role: PlayerRole;
+  team: PlayerTeam;
+  won: boolean;
+  distanceMeters: number;
+  durationSeconds: number;
+  timestamp: number;
+}
+
+export interface PlayerStats {
+  playerId: string;
+  nickname: string;
+  totalDistanceMeters: number;
+  currentMatchDistanceMeters: number;
+  totalPlaytimeSeconds: number;
+  matchesPlayed: number;
+  matchesWon: number;
+  timesCaught: number;
+  escapes: number;
+  matchHistory?: MatchHistoryRecord[];
 }
 
 export interface CatchAttempt {
@@ -79,15 +302,93 @@ export interface RadioTransmission {
   timestamp: number;
 }
 
+export type ChatRecipientType = 'ALL' | 'TEAM' | 'DIRECT';
+export type ChatChannelType = 'PUBLIC' | 'SQUAD' | 'RUNNERS' | 'CHASERS' | 'DIRECT';
+
+export interface ChatMessage {
+  id: string;
+  roomCode: string;
+  channelId: string; // 'PUBLIC', 'SQUAD', 'RUNNERS', 'CHASERS', or `DM:${id1}:${id2}`
+  conversationId: string;
+  senderId: string;
+  senderNickname: string;
+  senderTeam: PlayerTeam;
+  recipientType: ChatRecipientType;
+  recipientId?: string; // target player ID if DIRECT
+  text: string;
+  timestamp: number;
+}
+
+export type VoiceChannelId = 'SQUAD' | 'PUBLIC' | 'DIRECT';
+
+export interface VoiceParticipant {
+  playerId: string;
+  nickname: string;
+  team: PlayerTeam;
+  isSpeaking: boolean;
+  isMuted: boolean;
+  channelId: VoiceChannelId;
+  joinedAt: number;
+}
+
+export interface VoiceSignalPayload {
+  roomCode: string;
+  senderId: string;
+  targetPlayerId: string;
+  channelId: VoiceChannelId;
+  signal: any;
+}
+
+export interface PeerVoiceState {
+  playerId: string;
+  connectionState: 'closed' | 'connected' | 'connecting' | 'disconnected' | 'failed' | 'new' | string;
+  iceConnectionState: 'checking' | 'closed' | 'completed' | 'connected' | 'disconnected' | 'failed' | 'new' | string;
+  iceGatheringState: 'complete' | 'gathering' | 'new' | string;
+  hasAudioTrack: boolean;
+}
+
+export interface VoiceDiagnostics {
+  status: 'DISCONNECTED' | 'JOINING' | 'WAITING_PEERS' | 'NEGOTIATING' | 'CONNECTED';
+  selectedChannel: VoiceChannelId | null;
+  micPermission: 'prompt' | 'granted' | 'denied' | 'requesting';
+  hasMicStream: boolean;
+  authorizedPeerCount: number;
+  connectedPeerCount: number;
+  peerStates: Record<string, PeerVoiceState>;
+  autoplayBlocked: boolean;
+  lastError: string | null;
+}
+
+export interface ScheduledRunnerSnapshot {
+  snapshotTimestamp: number;
+  nextExpectedSnapshotAt: number;
+  intervalSeconds: number;
+  runners: Array<{
+    playerId: string;
+    nickname: string;
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    snapshotAgeSeconds: number;
+  }>;
+}
+
 export interface MatchSummary {
   startedAt: number;
-  endsAt: number;
+  headStartEndsAt: number; // exact timestamp when head-start expires
+  gameStartedAt: number;     // exact timestamp when active hunt starts
+  gameEndsAt: number;        // exact timestamp when match clock reaches zero
   totalDurationSeconds: number;
   remainingSeconds: number;
   pausedAt?: number;
   totalPausedSeconds: number;
   winnerTeam?: 'RUNNERS' | 'CHASERS' | 'DRAW';
   catches: CatchAttempt[];
+  lastScheduledSnapshot?: ScheduledRunnerSnapshot;
+  dynamicZoneState?: DynamicZoneState;
+  scoreLedger?: ScoreLedger;
+  activeMissions?: Record<string, ActiveMission>; // playerId -> active mission
+  completedMissions?: ActiveMission[];
 }
 
 export interface RoomState {

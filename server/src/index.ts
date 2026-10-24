@@ -11,14 +11,23 @@ import dotenv from 'dotenv';
 import { RoomService } from './services/roomService.js';
 import { MatchService } from './services/matchService.js';
 import { RadioService } from './services/radioService.js';
+import { ChatService } from './services/chatService.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import { VoiceService } from './services/voiceService.js';
+import { PlayerStatsService } from './services/playerStatsService.js';
+
 const PORT = process.env.PORT || 4000;
 const AUDIO_UPLOAD_DIR = path.join(__dirname, '../uploads/audio');
+
+// Ensure upload directory exists
+if (!fs.existsSync(AUDIO_UPLOAD_DIR)) {
+  fs.mkdirSync(AUDIO_UPLOAD_DIR, { recursive: true });
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -38,8 +47,12 @@ app.use(express.json());
 
 // Initialize core services
 const roomService = new RoomService();
-const matchService = new MatchService(io, roomService);
+const playerStatsService = new PlayerStatsService();
+const matchService = new MatchService(io, roomService, playerStatsService);
 const radioService = new RadioService(io, roomService, AUDIO_UPLOAD_DIR);
+const chatService = new ChatService(io, roomService);
+const voiceService = new VoiceService(io, roomService);
+matchService.setVoiceService(voiceService);
 
 // Multer storage for voice transmissions
 const storage = multer.diskStorage({
@@ -58,7 +71,7 @@ const upload = multer({
 });
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: Date.now(),
@@ -91,6 +104,12 @@ app.get('/api/room/:code', (req, res) => {
   res.json(roomService.getSanitizedRoomView(room, viewerId || ''));
 });
 
+// REST: Get Player Statistics Dossier
+app.get('/api/player/:id/stats', (req, res) => {
+  const stats = playerStatsService.getOrCreateStats(req.params.id);
+  res.json({ success: true, stats });
+});
+
 // REST: Upload Radio Audio
 app.post('/api/radio/upload', upload.single('audio'), (req, res) => {
   if (!req.file) {
@@ -106,8 +125,9 @@ app.post('/api/radio/upload', upload.single('audio'), (req, res) => {
   );
 
   if (!result.success) {
-    // Delete file if transmission failed
-    fs.unlinkSync(req.file.path);
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     return res.status(400).json({ error: result.error });
   }
 
@@ -123,7 +143,7 @@ app.get('/api/radio/stream/:filename', (req, res) => {
   res.sendFile(filePath);
 });
 
-// Socket.IO Real-Time Dispatcher with explicit Acknowledgements
+// Socket.IO Real-Time Dispatcher
 io.on('connection', (socket) => {
   // Create Room via Socket
   socket.on('room:create', ({ hostPlayerId, nickname }, callback) => {
@@ -132,12 +152,16 @@ io.on('connection', (socket) => {
       return;
     }
     const room = roomService.createRoom(hostPlayerId, socket.id, nickname || 'Host');
+    socket.data.playerId = hostPlayerId;
+    socket.data.roomCode = room.roomCode;
     socket.join(room.roomCode);
     if (typeof callback === 'function') callback({ success: true, room });
   });
 
   // Join Room
   socket.on('room:join', ({ roomCode, playerId, nickname }, callback) => {
+    socket.data.playerId = playerId;
+    socket.data.roomCode = roomCode;
     const result = roomService.joinRoom(roomCode, playerId, socket.id, nickname);
     if (!result.success || !result.room) {
       socket.emit('error', { message: result.error || 'Failed to join' });
@@ -147,7 +171,57 @@ io.on('connection', (socket) => {
 
     socket.join(roomCode);
     matchService.broadcastRoomState(result.room);
-    if (typeof callback === 'function') callback({ success: true, room: result.room });
+
+    // Sync chat history
+    const chatHistory = chatService.getHistoryForPlayer(result.room, playerId);
+    socket.emit('chat:history', chatHistory);
+
+    // If active hunt and viewer is chaser, sync latest scheduled snapshot
+    if (result.room.state === 'ACTIVE' && result.room.match?.lastScheduledSnapshot) {
+      const viewer = result.room.members[playerId];
+      if (viewer && (viewer.team === 'CHASERS' || viewer.role === 'REFEREE')) {
+        socket.emit('location:scheduled_snapshot', result.room.match.lastScheduledSnapshot);
+      }
+    }
+
+    if (typeof callback === 'function') {
+      const sanitized = roomService.getSanitizedRoomView(result.room, playerId);
+      callback({ success: true, room: sanitized });
+    }
+  });
+
+  // Leave Room (Authoritative removal, voice cleanup, and deterministic host migration)
+  socket.on('room:leave', ({ roomCode, playerId }, callback) => {
+    voiceService.leaveVoiceChannel(roomCode, playerId);
+    playerStatsService.clearPlayerTracking(playerId);
+    socket.leave(roomCode);
+
+    const result = roomService.leaveRoom(roomCode, playerId);
+    if (result.success) {
+      if (result.roomClosed) {
+        matchService.clearRoomTimers(roomCode);
+      } else if (result.room) {
+        matchService.broadcastRoomState(result.room);
+        const newHostNickname = result.newHostId ? result.room.members[result.newHostId]?.nickname : undefined;
+        io.to(roomCode).emit('match:alert', {
+          type: 'INFO',
+          title: 'Operative Departed',
+          message: newHostNickname
+            ? `Host departed. New Commander elected: ${newHostNickname}.`
+            : 'An operative departed the lobby.',
+          timestamp: Date.now(),
+        });
+      }
+      if (typeof callback === 'function') callback({ success: true });
+    } else {
+      if (typeof callback === 'function') callback({ success: false, error: result.error });
+    }
+  });
+
+  // Query Player Tactical Dossier & Statistics
+  socket.on('player:get_stats', ({ playerId }, callback) => {
+    const stats = playerStatsService.getOrCreateStats(playerId);
+    if (typeof callback === 'function') callback({ success: true, stats });
   });
 
   // Update Config
@@ -162,7 +236,98 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Assign Player Role
+  // Host Updates Play Area Map Boundary
+  socket.on(
+    'room:update_play_zone',
+    ({ roomCode, requesterId, playZone }, callback) => {
+      const result = roomService.updatePlayZone(roomCode, requesterId, playZone);
+      if (result.success && result.room) {
+        matchService.broadcastRoomState(result.room);
+        if (result.warning) {
+          socket.emit('match:alert', {
+            type: 'BOUNDARY_WARNING',
+            title: 'Play Area Warning',
+            message: result.warning,
+            timestamp: Date.now(),
+          });
+        }
+        if (typeof callback === 'function')
+          callback({ success: true, room: result.room, warning: result.warning });
+      } else {
+        socket.emit('error', { message: result.error });
+        if (typeof callback === 'function')
+          callback({ success: false, error: result.error });
+      }
+    }
+  );
+
+  // Host Drag-and-Drop or Dropdown Team Assignment ('RUNNERS', 'CHASERS', 'NONE')
+  socket.on(
+    'team:assign',
+    ({ roomCode, requesterId, hostPlayerId, targetPlayerId, team }, callback) => {
+      const authId = requesterId || hostPlayerId;
+      const result = roomService.assignPlayerTeam(
+        roomCode,
+        authId,
+        targetPlayerId,
+        team
+      );
+      if (result.success && result.room) {
+        matchService.broadcastRoomState(result.room);
+        if (typeof callback === 'function') callback({ success: true, room: result.room });
+      } else {
+        socket.emit('error', { message: result.error });
+        if (typeof callback === 'function') callback({ success: false, error: result.error });
+      }
+    }
+  );
+
+  // Host-Controlled Target Chaser Count
+  socket.on(
+    'team:set_target_chasers',
+    ({ roomCode, requesterId, hostPlayerId, targetCount }, callback) => {
+      const authId = requesterId || hostPlayerId;
+      const result = roomService.setTargetChaserCount(
+        roomCode,
+        authId,
+        targetCount
+      );
+      if (result.success && result.room) {
+        matchService.broadcastRoomState(result.room);
+        if (typeof callback === 'function') callback({ success: true, room: result.room });
+      } else {
+        socket.emit('error', { message: result.error });
+        if (typeof callback === 'function') callback({ success: false, error: result.error });
+      }
+    }
+  );
+
+  // Automatic Team Assignment on Server
+  socket.on('team:auto_assign', ({ roomCode, requesterId, hostPlayerId }, callback) => {
+    const authId = requesterId || hostPlayerId;
+    const result = roomService.autoAssignTeams(roomCode, authId);
+    if (result.success && result.room) {
+      matchService.broadcastRoomState(result.room);
+      io.to(roomCode).emit('match:alert', {
+        type: 'INFO',
+        title: 'Teams Auto-Assigned',
+        message: `Assigned ${result.chasersCount} Chaser(s) and ${result.runnersCount} Runner(s).`,
+        timestamp: Date.now(),
+      });
+      if (typeof callback === 'function')
+        callback({
+          success: true,
+          chasersCount: result.chasersCount,
+          runnersCount: result.runnersCount,
+          room: result.room,
+        });
+    } else {
+      socket.emit('error', { message: result.error });
+      if (typeof callback === 'function') callback({ success: false, error: result.error });
+    }
+  });
+
+  // Assign Player Role (Backwards-compatibility & referee mode)
   socket.on(
     'player:set_role',
     ({ roomCode, requesterId, targetPlayerId, role }, callback) => {
@@ -196,6 +361,82 @@ io.on('connection', (socket) => {
     }
   });
 
+  // In-Game Tactical Chat (PUBLIC, SQUAD, RUNNERS, CHASERS, DIRECT)
+  socket.on(
+    'chat:send',
+    ({ roomCode, senderId, channelId, recipientType, text, recipientId }, callback) => {
+      const targetChannel = channelId || recipientType || 'PUBLIC';
+      const result = chatService.sendMessage(
+        roomCode,
+        senderId,
+        targetChannel,
+        text,
+        recipientId
+      );
+      if (!result.success) {
+        socket.emit('error', { message: result.error });
+      }
+      if (typeof callback === 'function') callback(result);
+    }
+  );
+
+  // Get Chat History (Channel-specific or aggregated)
+  socket.on('chat:get_history', ({ roomCode, viewerId, channelId, targetDmId }, callback) => {
+    const room = roomService.getRoom(roomCode);
+    if (!room) {
+      if (typeof callback === 'function') callback({ success: false, error: 'Room not found' });
+      return;
+    }
+    if (channelId) {
+      const history = chatService.getHistoryForChannel(room, channelId, viewerId, targetDmId);
+      if (typeof callback === 'function') callback({ success: true, history, channelId });
+    } else {
+      const history = chatService.getHistoryForPlayer(room, viewerId);
+      if (typeof callback === 'function') callback({ success: true, history });
+    }
+  });
+
+  // WebRTC Walkie-Talkie Voice Channel: Join
+  socket.on('voice:join', ({ roomCode, playerId, channelId }, callback) => {
+    const result = voiceService.joinVoiceChannel(roomCode, playerId, channelId);
+    if (!result.success) {
+      socket.emit('error', { message: result.error });
+    }
+    if (typeof callback === 'function') callback(result);
+  });
+
+  // WebRTC Walkie-Talkie Voice Channel: Leave
+  socket.on('voice:leave', ({ roomCode, playerId }, callback) => {
+    voiceService.leaveVoiceChannel(roomCode, playerId);
+    if (typeof callback === 'function') callback({ success: true });
+  });
+
+  // WebRTC Walkie-Talkie Voice Channel: Push-to-Talk Speaking Indicator
+  socket.on('voice:speaking', ({ roomCode, playerId, channelId, isSpeaking }) => {
+    voiceService.setSpeaking(roomCode, playerId, channelId, isSpeaking);
+  });
+
+  // WebRTC Walkie-Talkie Voice Channel: Peer Signaling (SDP Offer/Answer/ICE)
+  socket.on(
+    'voice:signal',
+    ({ roomCode, senderId, targetPlayerId, channelId, signal }, callback) => {
+      const result = voiceService.relaySignal(
+        roomCode,
+        senderId,
+        targetPlayerId,
+        channelId,
+        signal
+      );
+      if (typeof callback === 'function') callback(result);
+    }
+  );
+
+  // WebRTC Walkie-Talkie Voice Channel: Query Participants
+  socket.on('voice:get_participants', ({ roomCode, channelId, viewerId }, callback) => {
+    const participants = voiceService.getChannelParticipants(roomCode, channelId, viewerId);
+    if (typeof callback === 'function') callback({ success: true, participants });
+  });
+
   // Match Start
   socket.on('match:start', ({ roomCode, initiatorId }, callback) => {
     const result = matchService.startMatch(roomCode, initiatorId);
@@ -219,6 +460,24 @@ io.on('connection', (socket) => {
       chaserId,
       targetRunnerId
     );
+    if (!result.success) {
+      socket.emit('error', { message: result.error });
+    }
+    if (typeof callback === 'function') callback(result);
+  });
+
+  // Catch Request Code (Runner requests short-lived, single-use 4-digit PIN)
+  socket.on('catch:request_code', ({ roomCode, runnerId }, callback) => {
+    const result = matchService.requestCatchCode(roomCode, runnerId);
+    if (!result.success) {
+      socket.emit('error', { message: result.error });
+    }
+    if (typeof callback === 'function') callback(result);
+  });
+
+  // Landmark Clue Answer Submission
+  socket.on('mission:answer_landmark', ({ roomCode, playerId, answer }, callback) => {
+    const result = matchService.answerLandmarkClue(roomCode, playerId, answer);
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
@@ -287,8 +546,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Track client disconnection reason
+  // Track client disconnection and clean up active voice channels
   socket.on('disconnect', (reason) => {
+    const pId = socket.data?.playerId;
+    const rCode = socket.data?.roomCode;
+    if (pId && rCode) {
+      voiceService.leaveVoiceChannel(rCode, pId);
+    } else {
+      const match = roomService.findRoomBySocketId(socket.id);
+      if (match) {
+        voiceService.leaveVoiceChannel(match.room.roomCode, match.member.id);
+      }
+    }
     console.log(`[Socket.IO] Client disconnected: ${socket.id} (reason: ${reason})`);
   });
 });
