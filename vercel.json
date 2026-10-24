@@ -14,9 +14,7 @@
       ]
     },
     "server": {
-      "root": "server",
-      "framework": "express",
-      "buildCommand": "npm run build",
+      "root": "server/",
       "entrypoint": "index.js"
     }
   },
@@ -24,31 +22,36 @@
     {
       "source": "/api",
       "destination": {
-        "service": "server"
+        "service": "server",
+        "path": "/api"
       }
     },
     {
       "source": "/api/(.*)",
       "destination": {
-        "service": "server"
+        "service": "server",
+        "path": "/api/$1"
       }
     },
     {
       "source": "/socket.io",
       "destination": {
-        "service": "server"
+        "service": "server",
+        "path": "/socket.io"
       }
     },
     {
       "source": "/socket.io/(.*)",
       "destination": {
-        "service": "server"
+        "service": "server",
+        "path": "/socket.io/$1"
       }
     },
     {
       "source": "/health",
       "destination": {
-        "service": "server"
+        "service": "server",
+        "path": "/health"
       }
     },
     {
