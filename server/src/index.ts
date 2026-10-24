@@ -125,6 +125,17 @@ app.get('/api/radio/stream/:filename', (req, res) => {
 
 // Socket.IO Real-Time Dispatcher with explicit Acknowledgements
 io.on('connection', (socket) => {
+  // Create Room via Socket
+  socket.on('room:create', ({ hostPlayerId, nickname }, callback) => {
+    if (!hostPlayerId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'hostPlayerId required' });
+      return;
+    }
+    const room = roomService.createRoom(hostPlayerId, socket.id, nickname || 'Host');
+    socket.join(room.roomCode);
+    if (typeof callback === 'function') callback({ success: true, room });
+  });
+
   // Join Room
   socket.on('room:join', ({ roomCode, playerId, nickname }, callback) => {
     const result = roomService.joinRoom(roomCode, playerId, socket.id, nickname);

@@ -136,6 +136,21 @@ export default function Home() {
     localStorage.setItem('manhunt_nickname', nickname);
 
     const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+
+    // If socket is connected, try creating room directly over socket
+    if (isConnected) {
+      emit('room:create', { hostPlayerId: playerId, nickname }, (res: any) => {
+        setIsCreating(false);
+        if (res?.success && res.room) {
+          setRoomCode(res.room.roomCode);
+        } else {
+          setErrorMsg(res?.error || 'Failed to create room via socket');
+        }
+      });
+      return;
+    }
+
+    // Otherwise use REST endpoint with clear error handling
     try {
       const res = await fetch(`${serverUrl}/api/room/create`, {
         method: 'POST',
@@ -149,7 +164,9 @@ export default function Home() {
         setErrorMsg(data.error || 'Failed to create room');
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Network error connecting to backend server');
+      setErrorMsg(
+        `Backend server unreachable at ${serverUrl}. Is the backend running? Run 'cd server; npm run dev'`
+      );
     } finally {
       setIsCreating(false);
     }
