@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -71,7 +71,7 @@ const upload = multer({
 });
 
 // Health check endpoint
-app.get(['/health', '/api/health'], (req, res) => {
+app.get(['/health', '/api/health'], (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: Date.now(),
@@ -80,7 +80,7 @@ app.get(['/health', '/api/health'], (req, res) => {
 });
 
 // REST: Create Room
-app.post('/api/room/create', (req, res) => {
+app.post('/api/room/create', (req: Request, res: Response) => {
   const { hostPlayerId, nickname } = req.body;
   if (!hostPlayerId) {
     return res.status(400).json({ error: 'hostPlayerId required' });
@@ -95,7 +95,7 @@ app.post('/api/room/create', (req, res) => {
 });
 
 // REST: Get Room Info
-app.get('/api/room/:code', (req, res) => {
+app.get('/api/room/:code', (req: Request, res: Response) => {
   const room = roomService.getRoom(req.params.code);
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
@@ -105,13 +105,13 @@ app.get('/api/room/:code', (req, res) => {
 });
 
 // REST: Get Player Statistics Dossier
-app.get('/api/player/:id/stats', (req, res) => {
+app.get('/api/player/:id/stats', (req: Request, res: Response) => {
   const stats = playerStatsService.getOrCreateStats(req.params.id);
   res.json({ success: true, stats });
 });
 
 // REST: Upload Radio Audio
-app.post('/api/radio/upload', upload.single('audio'), (req, res) => {
+app.post('/api/radio/upload', upload.single('audio'), (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No audio file provided' });
   }
@@ -135,7 +135,7 @@ app.post('/api/radio/upload', upload.single('audio'), (req, res) => {
 });
 
 // REST: Stream Audio File
-app.get('/api/radio/stream/:filename', (req, res) => {
+app.get('/api/radio/stream/:filename', (req: Request, res: Response) => {
   const filePath = path.join(AUDIO_UPLOAD_DIR, req.params.filename);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Audio file expired or not found' });

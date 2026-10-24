@@ -28,6 +28,7 @@ import MatchResultsModal from '../components/MatchResultsModal';
 import DevDiagnosticsPanel from '../components/DevDiagnosticsPanel';
 import HeadStartCountdownOverlay from '../components/HeadStartCountdownOverlay';
 import TacticalChatDrawer from '../components/TacticalChatDrawer';
+import { getBackendUrl } from '../utils/networkConfig';
 
 
 // Dynamic import of TacticalMap (Leaflet + OpenStreetMap) to prevent SSR window reference crashes
@@ -210,7 +211,7 @@ export default function Home() {
     setErrorMsg(null);
     localStorage.setItem('manhunt_nickname', nickname);
 
-    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+    const serverUrl = getBackendUrl();
 
     // If socket is connected, try creating room directly over socket
     if (isConnected) {

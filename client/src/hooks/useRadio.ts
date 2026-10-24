@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { RadioTransmission } from '../types/game';
+import { getBackendUrl } from '../utils/networkConfig';
 
 interface UseRadioProps {
   roomCode?: string;
@@ -144,7 +145,7 @@ export function useRadio({ roomCode, senderId }: UseRadioProps) {
     formData.append('senderId', senderId);
     formData.append('durationMs', recordedDurationMs.toString());
 
-    const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+    const serverUrl = getBackendUrl();
 
     try {
       const res = await fetch(`${serverUrl}/api/radio/upload`, {
@@ -198,7 +199,7 @@ export function useRadio({ roomCode, senderId }: UseRadioProps) {
 
   const playIncomingRadio = useCallback(
     (transmission: RadioTransmission, onEnded?: () => void) => {
-      const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+      const serverUrl = getBackendUrl();
       const fullUrl = `${serverUrl}${transmission.audioUrl}`;
 
       if (currentAudioElementRef.current) {

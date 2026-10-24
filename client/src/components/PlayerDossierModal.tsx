@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { PlayerStats, PlayerRole, PlayerTeam } from '../types/game';
 import PlayerAvatar from './PlayerAvatar';
+import { getBackendUrl } from '../utils/networkConfig';
 
 interface PlayerDossierModalProps {
   playerId: string;
@@ -56,7 +57,7 @@ export default function PlayerDossierModal({
       }
 
       // 2. Fallback to REST endpoint
-      const serverUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+      const serverUrl = getBackendUrl();
       try {
         const resp = await fetch(`${serverUrl}/api/player/${playerId}/stats`);
         const data = await resp.json();
