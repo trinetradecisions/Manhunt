@@ -51,6 +51,7 @@ export interface GameConfig {
   playZone: PlayZone;
   pingIntervalSeconds: number; // default 60s
   globalHeadStartSeconds: number; // default 120s (2 min)
+  individualHeadStarts?: Record<string, number>; // playerId -> custom seconds
   radioEnabled: boolean;
   catchProximityThresholdMeters: number; // default 25m
 }
@@ -64,6 +65,7 @@ export interface CatchAttempt {
   distanceMeters: number;
   timestamp: number;
   status: 'PENDING' | 'CONFIRMED' | 'DISPUTED' | 'DISMISSED';
+  verificationType?: 'PROXIMITY_CONFIRMED' | 'CODE_VERIFIED' | 'REFEREE_OVERRIDE';
   resolvedBy?: string;
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useSocket } from '../hooks/useSocket';
 import { useGeolocation } from '../hooks/useGeolocation';
@@ -8,14 +8,13 @@ import { useRadio } from '../hooks/useRadio';
 import LobbyView from '../components/LobbyView';
 import ActiveGameHUD from '../components/ActiveGameHUD';
 import MatchResultsModal from '../components/MatchResultsModal';
-import { PlayerRole } from '../types/game';
 
-// Dynamic import of Leaflet map to prevent SSR window reference crashes
-const TacticalMap = dynamic(() => import('../components/TacticalMap'), {
+// Dynamic import of GoogleTacticalMap to prevent SSR window reference crashes
+const GoogleTacticalMap = dynamic(() => import('../components/GoogleTacticalMap'), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full min-h-[300px] flex items-center justify-center bg-background text-neutral-500 text-xs font-mono">
-      INITIALIZING SATELLITE RADAR...
+    <div className="w-full h-full min-h-[350px] flex items-center justify-center bg-background text-neutral-500 text-xs font-mono">
+      INITIALIZING SATELLITE COMMAND RADAR...
     </div>
   ),
 });
@@ -28,7 +27,7 @@ export default function Home() {
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Initialize or restore guest session
+  // Initialize or restore guest session from localStorage
   useEffect(() => {
     let storedId = localStorage.getItem('manhunt_player_id');
     if (!storedId) {
@@ -37,10 +36,10 @@ export default function Home() {
     }
     setPlayerId(storedId);
 
-    const storedNick = localStorage.getItem('manhunt_nickname') || 'Operative_' + storedId.slice(-4);
+    const storedNick =
+      localStorage.getItem('manhunt_nickname') || 'Operative_' + storedId.slice(-4);
     setNickname(storedNick);
 
-    // Auto-detect room code from URL query parameter ?room=XXXXXX
     const params = new URLSearchParams(window.location.search);
     const queryRoom = params.get('room');
     if (queryRoom) {
@@ -61,7 +60,7 @@ export default function Home() {
   } = useSocket(roomCode, playerId, nickname);
 
   // Geolocation hook with auto socket location broadcast
-  const { location, isStale, refreshGps } = useGeolocation({
+  const { location, isStale } = useGeolocation({
     onLocationUpdate: (loc) => {
       if (roomCode && playerId) {
         emit('location:update', { roomCode, playerId, location: loc });
@@ -69,12 +68,19 @@ export default function Home() {
     },
   });
 
-  // Radio hook for push-to-talk voice
+  // Upgraded Radio hook with pre-send review & cancellation
   const {
-    isRecording,
+    recordingState,
+    recordingElapsedSeconds,
+    previewAudioUrl,
+    isPlayingPreview,
     audioError,
     startRecording,
     stopRecording,
+    cancelRecording,
+    sendRecording,
+    playPreviewAudio,
+    stopPreviewAudio,
     playIncomingRadio,
     triggerVibration,
   } = useRadio({ roomCode, senderId: playerId });
@@ -120,54 +126,55 @@ export default function Home() {
   // 1. Landing View (Create / Join Game)
   if (!roomState) {
     return (
-      <main className="min-h-screen bg-background text-neutral-100 flex flex-col justify-between p-6 max-w-md mx-auto">
-        <div className="space-y-6 pt-8">
-          {/* Brand Header */}
+      <main className="min-h-screen bg-background text-neutral-100 flex flex-col justify-between p-5 max-w-md mx-auto select-none">
+        <div className="space-y-6 pt-6">
+          {/* Tactical Header */}
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-2 bg-surface-elevated/80 border border-neutral-700 px-3 py-1 rounded-full text-[11px] font-bold text-tactical-chaser uppercase tracking-wider">
-              <span>●</span> Real-World GPS Pursuit
+            <div className="inline-flex items-center gap-1.5 bg-surface-elevated/90 border border-neutral-700/80 px-3 py-1 rounded-full text-[10px] font-bold text-tactical-chaser uppercase tracking-widest shadow">
+              <span className="w-2 h-2 rounded-full bg-tactical-chaser animate-pulse" />
+              Outdoor Real-World Pursuit
             </div>
             <h1 className="text-4xl font-black tracking-tight font-mono text-white">
               MANHUNT<span className="text-tactical-chaser">.WEB</span>
             </h1>
             <p className="text-xs text-neutral-400 max-w-xs mx-auto leading-relaxed">
-              Step into the real world. Split into Runners and Chasers. Play timed GPS hide-and-seek with live radio.
+              Step outdoors with your phone. Evade chasers across a live GPS zone with tactical walkie-talkie radio.
             </p>
           </div>
 
           {errorMsg && (
-            <div className="bg-tactical-danger/20 border border-tactical-danger text-tactical-danger p-3 rounded-xl text-xs font-semibold">
+            <div className="bg-tactical-danger/20 border border-tactical-danger text-tactical-danger p-3 rounded-2xl text-xs font-semibold">
               ⚠️ {errorMsg}
             </div>
           )}
 
-          {/* Player Nickname Card */}
-          <div className="bg-surface border border-neutral-800 p-5 rounded-2xl shadow-xl space-y-3">
-            <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider block">
-              Operative Nickname
+          {/* Nickname Input Card */}
+          <div className="bg-surface border border-neutral-800 p-5 rounded-3xl shadow-2xl space-y-2.5">
+            <label className="text-[11px] font-black text-neutral-400 uppercase tracking-widest block">
+              Operative Call-Sign
             </label>
             <input
               type="text"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
-              placeholder="Enter your nickname"
-              className="w-full bg-surface-elevated border border-neutral-700 rounded-xl px-4 py-3 text-sm font-semibold text-white focus:outline-none focus:border-tactical-chaser transition-all"
+              placeholder="Enter your call-sign"
+              className="w-full bg-surface-elevated border border-neutral-700 rounded-2xl px-4 py-3 text-sm font-semibold text-white focus:outline-none focus:border-tactical-chaser transition-all shadow-inner"
             />
           </div>
 
-          {/* Action Tabs: Create or Join */}
-          <div className="space-y-3">
+          {/* Actions: Create & Join */}
+          <div className="space-y-3.5">
             <button
               onClick={handleCreateRoom}
               disabled={isCreating}
-              className="w-full py-4 bg-tactical-chaser hover:brightness-110 active:scale-95 text-neutral-950 font-black rounded-2xl text-sm shadow-tactical-glow transition-all uppercase tracking-wider"
+              className="w-full py-4 bg-tactical-chaser hover:brightness-110 active:scale-95 text-neutral-950 font-black rounded-2xl text-xs shadow-tactical-glow transition-all uppercase tracking-wider"
             >
               {isCreating ? 'Deploying Session...' : 'Create Private Game Room ⚡'}
             </button>
 
-            <div className="flex items-center gap-3 my-3 text-xs text-neutral-500 uppercase tracking-widest font-mono">
+            <div className="flex items-center gap-3 my-2 text-[10px] text-neutral-500 uppercase tracking-widest font-mono">
               <span className="flex-1 border-t border-neutral-800" />
-              <span>OR JOIN WITH CODE</span>
+              <span>OR ENTER CODE</span>
               <span className="flex-1 border-t border-neutral-800" />
             </div>
 
@@ -178,11 +185,11 @@ export default function Home() {
                 onChange={(e) => setInputCode(e.target.value.toUpperCase())}
                 placeholder="6-CHAR CODE"
                 maxLength={6}
-                className="flex-1 bg-surface border border-neutral-700 rounded-2xl px-4 py-3 text-center text-base font-black font-mono tracking-widest text-tactical-chaser focus:outline-none focus:border-tactical-chaser"
+                className="flex-1 bg-surface border border-neutral-700 rounded-2xl px-4 py-3 text-center text-base font-black font-mono tracking-widest text-tactical-chaser focus:outline-none focus:border-tactical-chaser shadow-inner"
               />
               <button
                 onClick={handleJoinRoom}
-                className="px-6 py-3 bg-surface-elevated hover:bg-neutral-800 active:scale-95 text-neutral-100 font-bold rounded-2xl text-sm border border-neutral-700 transition-all"
+                className="px-6 py-3 bg-surface-elevated hover:bg-neutral-800 active:scale-95 text-neutral-100 font-bold rounded-2xl text-xs border border-neutral-700 transition-all shadow"
               >
                 Join
               </button>
@@ -190,16 +197,16 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Footer Rules Note */}
-        <div className="text-center text-[11px] text-neutral-500 py-4 space-y-1">
-          <p>Requires browser GPS and microphone for tactical team radio.</p>
+        {/* Footer Guidance */}
+        <div className="text-center text-[10px] text-neutral-500 py-4 space-y-1">
+          <p>Requires browser GPS and microphone permissions.</p>
           <p className="text-neutral-600">Built for outdoor parks, campuses & safe open zones.</p>
         </div>
       </main>
     );
   }
 
-  // 2. Active Game Screen: Lobby vs Pursuit vs Results
+  // 2. Active Session Screen
   const isInLobby = roomState.state === 'LOBBY' || roomState.state === 'READY_CHECK';
   const isMatchCompleted = roomState.state === 'COMPLETED';
 
@@ -207,18 +214,18 @@ export default function Home() {
     <div className="relative w-screen h-screen overflow-hidden flex flex-col bg-background select-none">
       {/* Toast Alert Banner */}
       {recentAlert && (
-        <div className="absolute top-3 left-4 right-4 z-[900] flex justify-center">
+        <div className="absolute top-3 left-4 right-4 z-[900] flex justify-center pointer-events-auto">
           <div
             className={`p-3.5 rounded-2xl shadow-2xl max-w-sm w-full border text-xs font-bold flex items-center justify-between ${
               recentAlert.type === 'SAFETY_PAUSE'
-                ? 'bg-tactical-danger border-red-500 text-white'
+                ? 'bg-tactical-danger border-red-500 text-white animate-bounce'
                 : recentAlert.type === 'BOUNDARY_WARNING'
                 ? 'bg-tactical-danger/90 border-red-500 text-white animate-pulse'
                 : 'bg-surface-elevated border-neutral-700 text-neutral-200'
             }`}
           >
             <div>
-              <span className="block font-black text-sm">{recentAlert.title}</span>
+              <span className="block font-black text-xs uppercase">{recentAlert.title}</span>
               <span className="text-[11px] font-normal">{recentAlert.message}</span>
             </div>
             <button
@@ -231,7 +238,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Lobby View Screen */}
+      {/* Viewport Router: Lobby vs Tactical Game Map */}
       {isInLobby ? (
         <LobbyView
           roomState={roomState}
@@ -261,9 +268,9 @@ export default function Home() {
           }
         />
       ) : (
-        /* Fullscreen Tactical Map View with Active HUD */
+        /* Fullscreen Interactive Google Tactical Map & HUD */
         <div className="relative w-full h-full">
-          <TacticalMap
+          <GoogleTacticalMap
             playZone={roomState.config.playZone}
             myLocation={location}
             myRole={roomState.members[playerId]?.role || 'RUNNER'}
@@ -279,16 +286,32 @@ export default function Home() {
             isGpsStale={isStale}
             pendingCatch={pendingCatch}
             incomingRadio={incomingRadio}
-            isRecordingRadio={isRecording}
+            radioRecordingState={recordingState}
+            radioElapsedSeconds={recordingElapsedSeconds}
+            radioPreviewUrl={previewAudioUrl}
+            isPlayingPreview={isPlayingPreview}
+            radioError={audioError}
             onStartRadio={startRecording}
             onStopRadio={stopRecording}
-            onPlayRadio={(t) => playIncomingRadio(t, dismissRadio)}
-            onDismissRadio={dismissRadio}
+            onCancelRadio={cancelRecording}
+            onSendRadio={sendRecording}
+            onPlayPreview={playPreviewAudio}
+            onStopPreview={stopPreviewAudio}
+            onPlayIncomingRadio={(t) => playIncomingRadio(t, dismissRadio)}
+            onDismissIncomingRadio={dismissRadio}
             onAttemptCatch={(targetRunnerId) =>
               emit('catch:attempt', {
                 roomCode,
                 chaserId: playerId,
                 targetRunnerId,
+              })
+            }
+            onAttemptCatchWithCode={(targetRunnerId, catchCode) =>
+              emit('catch:attempt_code', {
+                roomCode,
+                chaserId: playerId,
+                targetRunnerId,
+                catchCode,
               })
             }
             onRespondCatch={(attemptId, response) =>

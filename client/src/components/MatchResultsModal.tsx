@@ -21,7 +21,7 @@ export default function MatchResultsModal({
 
   return (
     <div className="fixed inset-0 z-[800] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-surface border border-neutral-700 w-full max-w-md rounded-3xl p-6 text-center shadow-2xl space-y-6">
+      <div className="bg-surface border border-neutral-700 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl space-y-5">
         <div className="space-y-2">
           <span className="text-4xl">{isRunnerVictory ? '🏃‍♂️' : '🎯'}</span>
           <h2
@@ -38,10 +38,10 @@ export default function MatchResultsModal({
           </p>
         </div>
 
-        {/* Catches Timeline */}
+        {/* Catches Highlights */}
         <div className="bg-surface-elevated/70 border border-neutral-800 rounded-2xl p-4 text-left space-y-2 max-h-48 overflow-y-auto">
-          <h4 className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
-            Match Highlights ({catches.length} Tags)
+          <h4 className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
+            Match Highlights ({catches.length} Verified Tags)
           </h4>
           {catches.length === 0 ? (
             <p className="text-xs text-neutral-500 italic">No runners were caught!</p>
@@ -49,13 +49,21 @@ export default function MatchResultsModal({
             catches.map((c, i) => (
               <div
                 key={i}
-                className="text-xs flex items-center justify-between py-1 border-b border-neutral-800/60 last:border-0"
+                className="text-xs flex items-center justify-between py-1.5 border-b border-neutral-800/60 last:border-0"
               >
-                <span className="text-neutral-200">
-                  <span className="font-bold text-tactical-chaser">{c.chaserNickname}</span> tagged{' '}
-                  <span className="font-bold text-tactical-runner">{c.runnerNickname}</span>
-                </span>
-                <span className="text-[10px] text-neutral-500">{c.distanceMeters}m tag</span>
+                <div>
+                  <span className="text-neutral-200 font-semibold">
+                    <span className="text-tactical-chaser">{c.chaserNickname}</span> tagged{' '}
+                    <span className="text-tactical-runner">{c.runnerNickname}</span>
+                  </span>
+                  <span className="block text-[10px] text-neutral-400">
+                    {c.verificationType === 'CODE_VERIFIED'
+                      ? 'PIN Code Verified'
+                      : c.verificationType === 'REFEREE_OVERRIDE'
+                      ? 'Referee Override'
+                      : `${c.distanceMeters}m proximity tag`}
+                  </span>
+                </div>
               </div>
             ))
           )}
@@ -66,13 +74,13 @@ export default function MatchResultsModal({
           {isHost ? (
             <button
               onClick={onRematch}
-              className="w-full py-3.5 bg-tactical-chaser hover:brightness-110 active:scale-95 text-neutral-950 font-black rounded-2xl text-sm shadow-tactical-glow transition-all uppercase tracking-wider"
+              className="w-full py-3.5 bg-tactical-chaser hover:brightness-110 active:scale-95 text-neutral-950 font-black rounded-2xl text-xs uppercase tracking-wider shadow-tactical-glow transition-all"
             >
               🔄 Rematch (Back to Lobby)
             </button>
           ) : (
             <p className="text-xs text-neutral-500 italic">
-              Waiting for Host to start rematch...
+              Waiting for Host to initiate rematch...
             </p>
           )}
         </div>

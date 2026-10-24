@@ -40,6 +40,7 @@ export interface PlayerMember {
   lastLocation?: PlayerLocation;
   isCaught?: boolean;
   caughtAt?: number;
+  individualHeadStartSeconds?: number;
   catchCode?: string;
 }
 
@@ -49,6 +50,7 @@ export interface GameConfig {
   playZone: PlayZone;
   pingIntervalSeconds: number;
   globalHeadStartSeconds: number;
+  individualHeadStarts?: Record<string, number>;
   radioEnabled: boolean;
   catchProximityThresholdMeters: number;
 }
@@ -62,6 +64,7 @@ export interface CatchAttempt {
   distanceMeters: number;
   timestamp: number;
   status: 'PENDING' | 'CONFIRMED' | 'DISPUTED' | 'DISMISSED';
+  verificationType?: 'PROXIMITY_CONFIRMED' | 'CODE_VERIFIED' | 'REFEREE_OVERRIDE';
   resolvedBy?: string;
 }
 

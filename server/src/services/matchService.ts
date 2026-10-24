@@ -15,6 +15,7 @@ export class MatchService {
   private roomService: RoomService;
   private matchIntervals: Map<string, NodeJS.Timeout> = new Map();
   private pendingCatches: Map<string, CatchAttempt> = new Map();
+  private failedCodeAttempts: Map<string, { count: number; lastAttempt: number }> = new Map();
 
   constructor(io: Server, roomService: RoomService) {
     this.io = io;
@@ -84,10 +85,13 @@ export class MatchService {
       catches: [],
     };
 
-    // Reset member caught states
+    // Reset member caught states and setup individual head starts
     for (const m of Object.values(room.members)) {
       m.isCaught = false;
       delete m.caughtAt;
+      if (m.team === 'RUNNERS' && room.config.individualHeadStarts?.[m.id]) {
+        m.individualHeadStartSeconds = room.config.individualHeadStarts[m.id];
+      }
     }
 
     this.broadcastRoomState(room);
@@ -121,7 +125,7 @@ export class MatchService {
         this.io.to(room.roomCode).emit('match:alert', {
           type: 'INFO',
           title: 'Chasers Released!',
-          message: 'The chase has officially begun. Runners evade!',
+          message: 'The chase has officially begun. Evade and survive!',
           timestamp: now,
         });
         this.broadcastRoomState(room);
@@ -143,7 +147,7 @@ export class MatchService {
 
         // Time expiration victory check
         if (remaining <= 0) {
-          this.endMatch(room, 'RUNNERS', 'Time expired! Runners survived.');
+          this.endMatch(room, 'RUNNERS', 'Time expired! Runners survived the hunt.');
         }
       }
     }, 1000);
@@ -261,6 +265,7 @@ export class MatchService {
       distanceMeters: Math.round(validation.rawDistance),
       timestamp: Date.now(),
       status: 'PENDING',
+      verificationType: 'PROXIMITY_CONFIRMED',
     };
 
     this.pendingCatches.set(attempt.id, attempt);
@@ -269,6 +274,76 @@ export class MatchService {
     this.io.to(runner.socketId).emit('catch:pending', attempt);
     // Notify chaser that attempt is registered
     this.io.to(chaser.socketId).emit('catch:pending', attempt);
+
+    return { success: true, attempt };
+  }
+
+  public attemptCatchWithCode(
+    roomCode: string,
+    chaserId: string,
+    targetRunnerId: string,
+    catchCode: string
+  ): { success: boolean; attempt?: CatchAttempt; error?: string } {
+    const room = this.roomService.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.state !== 'ACTIVE')
+      return { success: false, error: 'Catch attempts only allowed when active' };
+
+    const chaser = room.members[chaserId];
+    const runner = room.members[targetRunnerId];
+
+    if (!chaser || chaser.team !== 'CHASERS') {
+      return { success: false, error: 'Only chasers can attempt catches' };
+    }
+    if (!runner || runner.team !== 'RUNNERS') {
+      return { success: false, error: 'Target must be an active runner' };
+    }
+    if (runner.isCaught) {
+      return { success: false, error: 'Runner is already caught' };
+    }
+
+    // Rate limiting: 3 failed attempts lockout for 30s
+    const throttleKey = `${chaserId}:${targetRunnerId}`;
+    const throttle = this.failedCodeAttempts.get(throttleKey);
+    const now = Date.now();
+    if (throttle && throttle.count >= 3 && now - throttle.lastAttempt < 30000) {
+      const waitSec = Math.ceil((30000 - (now - throttle.lastAttempt)) / 1000);
+      return {
+        success: false,
+        error: `Too many failed code attempts. Locked out for ${waitSec}s`,
+      };
+    }
+
+    if (!runner.catchCode || runner.catchCode !== catchCode.trim()) {
+      const currentCount = (throttle?.count || 0) + 1;
+      this.failedCodeAttempts.set(throttleKey, {
+        count: currentCount,
+        lastAttempt: now,
+      });
+      return {
+        success: false,
+        error: `Incorrect Catch Code (${3 - (currentCount % 3 || 3)} attempts remaining)`,
+      };
+    }
+
+    // Correct code: reset throttle
+    this.failedCodeAttempts.delete(throttleKey);
+
+    const attempt: CatchAttempt = {
+      id: uuidv4(),
+      chaserId,
+      chaserNickname: chaser.nickname,
+      runnerId: targetRunnerId,
+      runnerNickname: runner.nickname,
+      distanceMeters: 0, // In-person code verified
+      timestamp: Date.now(),
+      status: 'CONFIRMED',
+      verificationType: 'CODE_VERIFIED',
+      resolvedBy: chaser.nickname,
+    };
+
+    this.pendingCatches.set(attempt.id, attempt);
+    this.finalizeCatch(attempt, room);
 
     return { success: true, attempt };
   }
@@ -322,6 +397,7 @@ export class MatchService {
     attempt.resolvedBy = actor.nickname;
     if (decision === 'CONFIRMED') {
       attempt.status = 'CONFIRMED';
+      attempt.verificationType = 'REFEREE_OVERRIDE';
       this.finalizeCatch(attempt, room);
     } else {
       attempt.status = 'DISMISSED';
@@ -361,6 +437,7 @@ export class MatchService {
       runnerId: attempt.runnerId,
       runnerNickname: attempt.runnerNickname,
       status: 'CAUGHT',
+      verificationType: attempt.verificationType || 'PROXIMITY_CONFIRMED',
       resolvedBy: attempt.resolvedBy || attempt.chaserNickname,
     });
 

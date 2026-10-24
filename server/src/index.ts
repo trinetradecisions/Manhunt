@@ -18,7 +18,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 4000;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:3000';
 const AUDIO_UPLOAD_DIR = path.join(__dirname, '../uploads/audio');
 
 const app = express();
@@ -121,33 +120,38 @@ app.get('/api/radio/stream/:filename', (req, res) => {
   res.sendFile(filePath);
 });
 
-// Socket.IO Real-Time Dispatcher
+// Socket.IO Real-Time Dispatcher with explicit Acknowledgements
 io.on('connection', (socket) => {
   // Join Room
-  socket.on('room:join', ({ roomCode, playerId, nickname }) => {
+  socket.on('room:join', ({ roomCode, playerId, nickname }, callback) => {
     const result = roomService.joinRoom(roomCode, playerId, socket.id, nickname);
     if (!result.success || !result.room) {
-      return socket.emit('error', { message: result.error || 'Failed to join' });
+      socket.emit('error', { message: result.error || 'Failed to join' });
+      if (typeof callback === 'function') callback({ success: false, error: result.error });
+      return;
     }
 
     socket.join(roomCode);
     matchService.broadcastRoomState(result.room);
+    if (typeof callback === 'function') callback({ success: true, room: result.room });
   });
 
   // Update Config
-  socket.on('room:update_config', ({ roomCode, requesterId, config }) => {
+  socket.on('room:update_config', ({ roomCode, requesterId, config }, callback) => {
     const result = roomService.updateConfig(roomCode, requesterId, config);
     if (result.success && result.room) {
       matchService.broadcastRoomState(result.room);
+      if (typeof callback === 'function') callback({ success: true });
     } else {
       socket.emit('error', { message: result.error });
+      if (typeof callback === 'function') callback({ success: false, error: result.error });
     }
   });
 
   // Assign Player Role
   socket.on(
     'player:set_role',
-    ({ roomCode, requesterId, targetPlayerId, role }) => {
+    ({ roomCode, requesterId, targetPlayerId, role }, callback) => {
       const result = roomService.setPlayerRole(
         roomCode,
         requesterId,
@@ -156,14 +160,16 @@ io.on('connection', (socket) => {
       );
       if (result.success && result.room) {
         matchService.broadcastRoomState(result.room);
+        if (typeof callback === 'function') callback({ success: true });
       } else {
         socket.emit('error', { message: result.error });
+        if (typeof callback === 'function') callback({ success: false, error: result.error });
       }
     }
   );
 
   // Player Readiness
-  socket.on('player:set_ready', ({ roomCode, playerId, ready, gpsStatus }) => {
+  socket.on('player:set_ready', ({ roomCode, playerId, ready, gpsStatus }, callback) => {
     const result = roomService.setPlayerReady(
       roomCode,
       playerId,
@@ -172,14 +178,18 @@ io.on('connection', (socket) => {
     );
     if (result.success && result.room) {
       matchService.broadcastRoomState(result.room);
+      if (typeof callback === 'function') callback({ success: true });
     }
   });
 
   // Match Start
-  socket.on('match:start', ({ roomCode, initiatorId }) => {
+  socket.on('match:start', ({ roomCode, initiatorId }, callback) => {
     const result = matchService.startMatch(roomCode, initiatorId);
     if (!result.success) {
       socket.emit('error', { message: result.error });
+      if (typeof callback === 'function') callback({ success: false, error: result.error });
+    } else {
+      if (typeof callback === 'function') callback({ success: true });
     }
   });
 
@@ -188,8 +198,8 @@ io.on('connection', (socket) => {
     matchService.updatePlayerLocation(roomCode, playerId, location);
   });
 
-  // Catch Attempt
-  socket.on('catch:attempt', ({ roomCode, chaserId, targetRunnerId }) => {
+  // Catch Attempt (Proximity Tag)
+  socket.on('catch:attempt', ({ roomCode, chaserId, targetRunnerId }, callback) => {
     const result = matchService.attemptCatch(
       roomCode,
       chaserId,
@@ -198,18 +208,34 @@ io.on('connection', (socket) => {
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
+    if (typeof callback === 'function') callback(result);
+  });
+
+  // Catch Attempt with Dynamic 4-Digit Catch Code
+  socket.on('catch:attempt_code', ({ roomCode, chaserId, targetRunnerId, catchCode }, callback) => {
+    const result = matchService.attemptCatchWithCode(
+      roomCode,
+      chaserId,
+      targetRunnerId,
+      catchCode
+    );
+    if (!result.success) {
+      socket.emit('error', { message: result.error });
+    }
+    if (typeof callback === 'function') callback(result);
   });
 
   // Catch Response
-  socket.on('catch:respond', ({ attemptId, runnerId, response }) => {
+  socket.on('catch:respond', ({ attemptId, runnerId, response }, callback) => {
     const result = matchService.respondCatch(attemptId, runnerId, response);
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
+    if (typeof callback === 'function') callback(result);
   });
 
   // Catch Override
-  socket.on('catch:override', ({ roomCode, actorId, attemptId, decision }) => {
+  socket.on('catch:override', ({ roomCode, actorId, attemptId, decision }, callback) => {
     const result = matchService.overrideCatch(
       roomCode,
       actorId,
@@ -219,22 +245,25 @@ io.on('connection', (socket) => {
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
+    if (typeof callback === 'function') callback(result);
   });
 
   // Safety Pause
-  socket.on('match:safety_pause', ({ roomCode, initiatorId, reason }) => {
+  socket.on('match:safety_pause', ({ roomCode, initiatorId, reason }, callback) => {
     const result = matchService.safetyPause(roomCode, initiatorId, reason);
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
+    if (typeof callback === 'function') callback(result);
   });
 
   // Resume Match
-  socket.on('match:resume', ({ roomCode, initiatorId }) => {
+  socket.on('match:resume', ({ roomCode, initiatorId }, callback) => {
     const result = matchService.resumeMatch(roomCode, initiatorId);
     if (!result.success) {
       socket.emit('error', { message: result.error });
     }
+    if (typeof callback === 'function') callback(result);
   });
 });
 

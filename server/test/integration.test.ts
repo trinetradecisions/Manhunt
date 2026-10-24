@@ -35,20 +35,26 @@ describe('Full Stack Multiplayer Integration Test', () => {
       path.join(__dirname, '../uploads/audio_test')
     );
 
-    // Socket dispatcher
+    // Socket dispatcher with acknowledgements
     ioServer.on('connection', (socket) => {
-      socket.on('room:join', ({ roomCode, playerId, nickname }) => {
+      socket.on('room:join', ({ roomCode, playerId, nickname }, cb) => {
         const res = roomService.joinRoom(roomCode, playerId, socket.id, nickname);
         if (res.success && res.room) {
           socket.join(roomCode);
           matchService.broadcastRoomState(res.room);
+          if (cb) cb({ success: true, room: res.room });
+        } else {
+          if (cb) cb({ success: false, error: res.error });
         }
       });
 
-      socket.on('player:set_role', ({ roomCode, requesterId, targetPlayerId, role }) => {
+      socket.on('player:set_role', ({ roomCode, requesterId, targetPlayerId, role }, cb) => {
         const res = roomService.setPlayerRole(roomCode, requesterId, targetPlayerId, role);
         if (res.success && res.room) {
           matchService.broadcastRoomState(res.room);
+          if (cb) cb({ success: true });
+        } else {
+          if (cb) cb({ success: false, error: res.error });
         }
       });
 
@@ -56,16 +62,24 @@ describe('Full Stack Multiplayer Integration Test', () => {
         matchService.updatePlayerLocation(roomCode, playerId, location);
       });
 
-      socket.on('catch:attempt', ({ roomCode, chaserId, targetRunnerId }) => {
-        matchService.attemptCatch(roomCode, chaserId, targetRunnerId);
+      socket.on('catch:attempt', ({ roomCode, chaserId, targetRunnerId }, cb) => {
+        const res = matchService.attemptCatch(roomCode, chaserId, targetRunnerId);
+        if (cb) cb(res);
       });
 
-      socket.on('catch:respond', ({ attemptId, runnerId, response }) => {
-        matchService.respondCatch(attemptId, runnerId, response);
+      socket.on('catch:attempt_code', ({ roomCode, chaserId, targetRunnerId, catchCode }, cb) => {
+        const res = matchService.attemptCatchWithCode(roomCode, chaserId, targetRunnerId, catchCode);
+        if (cb) cb(res);
       });
 
-      socket.on('match:safety_pause', ({ roomCode, initiatorId, reason }) => {
-        matchService.safetyPause(roomCode, initiatorId, reason);
+      socket.on('catch:respond', ({ attemptId, runnerId, response }, cb) => {
+        const res = matchService.respondCatch(attemptId, runnerId, response);
+        if (cb) cb(res);
+      });
+
+      socket.on('match:safety_pause', ({ roomCode, initiatorId, reason }, cb) => {
+        const res = matchService.safetyPause(roomCode, initiatorId, reason);
+        if (cb) cb(res);
       });
     });
 
@@ -86,7 +100,7 @@ describe('Full Stack Multiplayer Integration Test', () => {
     server?.close();
   });
 
-  it('orchestrates room creation and multi-player socket joining', async () => {
+  it('orchestrates room creation and sequential multi-player socket joining', async () => {
     const initialRoom = roomService.createRoom('host_user', 'sock_host', 'HostAlpha');
     roomCode = initialRoom.roomCode;
     expect(roomCode).toBeDefined();
@@ -95,12 +109,11 @@ describe('Full Stack Multiplayer Integration Test', () => {
     hostSocket = Client(`http://localhost:${port}`);
     await new Promise<void>((resolve) => {
       hostSocket.on('connect', () => {
-        hostSocket.emit('room:join', {
-          roomCode,
-          playerId: 'host_user',
-          nickname: 'HostAlpha',
-        });
-        resolve();
+        hostSocket.emit(
+          'room:join',
+          { roomCode, playerId: 'host_user', nickname: 'HostAlpha' },
+          () => resolve()
+        );
       });
     });
 
@@ -108,12 +121,11 @@ describe('Full Stack Multiplayer Integration Test', () => {
     runnerSocket = Client(`http://localhost:${port}`);
     await new Promise<void>((resolve) => {
       runnerSocket.on('connect', () => {
-        runnerSocket.emit('room:join', {
-          roomCode,
-          playerId: 'runner_user',
-          nickname: 'SpeedyRunner',
-        });
-        resolve();
+        runnerSocket.emit(
+          'room:join',
+          { roomCode, playerId: 'runner_user', nickname: 'SpeedyRunner' },
+          () => resolve()
+        );
       });
     });
 
@@ -121,37 +133,29 @@ describe('Full Stack Multiplayer Integration Test', () => {
     chaserSocket = Client(`http://localhost:${port}`);
     await new Promise<void>((resolve) => {
       chaserSocket.on('connect', () => {
-        chaserSocket.emit('room:join', {
-          roomCode,
-          playerId: 'chaser_user',
-          nickname: 'HunterBeta',
-        });
-        resolve();
+        chaserSocket.emit(
+          'room:join',
+          { roomCode, playerId: 'chaser_user', nickname: 'HunterBeta' },
+          () => resolve()
+        );
       });
     });
 
-    // Set roles: runner_user -> RUNNER, chaser_user -> CHASER
-    hostSocket.emit('player:set_role', {
-      roomCode,
-      requesterId: 'host_user',
-      targetPlayerId: 'runner_user',
-      role: 'RUNNER',
+    // Set roles with acknowledgement callbacks
+    await new Promise<void>((resolve, reject) => {
+      hostSocket.emit(
+        'player:set_role',
+        { roomCode, requesterId: 'host_user', targetPlayerId: 'runner_user', role: 'RUNNER' },
+        (res: any) => (res.success ? resolve() : reject(res.error))
+      );
     });
 
-    hostSocket.emit('player:set_role', {
-      roomCode,
-      requesterId: 'host_user',
-      targetPlayerId: 'chaser_user',
-      role: 'CHASER',
-    });
-
-    // Wait for room update
-    await new Promise<void>((resolve) => {
-      runnerSocket.on('room:state', (state) => {
-        if (state.members['chaser_user']?.team === 'CHASERS') {
-          resolve();
-        }
-      });
+    await new Promise<void>((resolve, reject) => {
+      hostSocket.emit(
+        'player:set_role',
+        { roomCode, requesterId: 'host_user', targetPlayerId: 'chaser_user', role: 'CHASER' },
+        (res: any) => (res.success ? resolve() : reject(res.error))
+      );
     });
 
     const activeRoom = roomService.getRoom(roomCode)!;
@@ -161,9 +165,8 @@ describe('Full Stack Multiplayer Integration Test', () => {
 
   it('validates catch attempt when chaser and runner are in proximity and handles confirmation', async () => {
     const activeRoom = roomService.getRoom(roomCode)!;
-    activeRoom.state = 'ACTIVE'; // simulate active match state
+    activeRoom.state = 'ACTIVE';
 
-    // Report locations within 15 meters
     const runnerLocation = {
       latitude: 51.5000,
       longitude: -0.1200,
@@ -198,12 +201,11 @@ describe('Full Stack Multiplayer Integration Test', () => {
 
     // Listen for catch:pending on runner
     const catchPendingPromise = new Promise<any>((resolve) => {
-      runnerSocket.on('catch:pending', (attempt) => {
+      runnerSocket.once('catch:pending', (attempt) => {
         resolve(attempt);
       });
     });
 
-    // Chaser claims catch
     chaserSocket.emit('catch:attempt', {
       roomCode,
       chaserId: 'chaser_user',
@@ -216,7 +218,7 @@ describe('Full Stack Multiplayer Integration Test', () => {
 
     // Runner confirms catch
     const catchResolvedPromise = new Promise<any>((resolve) => {
-      hostSocket.on('catch:resolved', (result) => {
+      hostSocket.once('catch:resolved', (result) => {
         resolve(result);
       });
     });
@@ -232,9 +234,40 @@ describe('Full Stack Multiplayer Integration Test', () => {
     expect(activeRoom.members['runner_user'].isCaught).toBe(true);
   });
 
+  it('validates dynamic 4-digit catch code verification flow', async () => {
+    const activeRoom = roomService.getRoom(roomCode)!;
+    activeRoom.state = 'ACTIVE';
+    // Reset runner caught state and generate code
+    activeRoom.members['runner_user'].isCaught = false;
+    activeRoom.members['runner_user'].catchCode = '7429';
+
+    // 1. Wrong code test
+    const wrongCodeRes = await new Promise<any>((resolve) => {
+      chaserSocket.emit(
+        'catch:attempt_code',
+        { roomCode, chaserId: 'chaser_user', targetRunnerId: 'runner_user', catchCode: '0000' },
+        (res: any) => resolve(res)
+      );
+    });
+    expect(wrongCodeRes.success).toBe(false);
+    expect(wrongCodeRes.error).toContain('Incorrect Catch Code');
+
+    // 2. Correct code test
+    const correctCodeRes = await new Promise<any>((resolve) => {
+      chaserSocket.emit(
+        'catch:attempt_code',
+        { roomCode, chaserId: 'chaser_user', targetRunnerId: 'runner_user', catchCode: '7429' },
+        (res: any) => resolve(res)
+      );
+    });
+    expect(correctCodeRes.success).toBe(true);
+    expect(correctCodeRes.attempt.verificationType).toBe('CODE_VERIFIED');
+    expect(activeRoom.members['runner_user'].isCaught).toBe(true);
+  });
+
   it('triggers emergency safety pause and alerts all connected clients', async () => {
     const safetyAlertPromise = new Promise<any>((resolve) => {
-      runnerSocket.on('match:alert', (alert) => {
+      runnerSocket.once('match:alert', (alert) => {
         if (alert.type === 'SAFETY_PAUSE') {
           resolve(alert);
         }

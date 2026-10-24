@@ -40,7 +40,11 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     socket.on('connect', () => {
       setIsConnected(true);
       if (roomCode && playerId) {
-        socket.emit('room:join', { roomCode, playerId, nickname });
+        socket.emit('room:join', { roomCode, playerId, nickname }, (res: any) => {
+          if (res?.success && res.room) {
+            setRoomState(res.room);
+          }
+        });
       }
     });
 
@@ -54,7 +58,6 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
 
     socket.on('match:alert', (alert) => {
       setRecentAlert(alert);
-      // Auto-clear transient info after 6s
       if (alert.type !== 'SAFETY_PAUSE') {
         setTimeout(() => setRecentAlert(null), 6000);
       }
@@ -81,9 +84,13 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     };
   }, [roomCode, playerId, nickname]);
 
-  const emit = useCallback((event: string, payload: any) => {
+  const emit = useCallback((event: string, payload: any, callback?: (res: any) => void) => {
     if (socketRef.current?.connected) {
-      socketRef.current.emit(event, payload);
+      if (callback) {
+        socketRef.current.emit(event, payload, callback);
+      } else {
+        socketRef.current.emit(event, payload);
+      }
     }
   }, []);
 
