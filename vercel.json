@@ -17,12 +17,24 @@
       "root": "server",
       "framework": "express",
       "buildCommand": "npm run build",
-      "entrypoint": "dist/index.js"
+      "entrypoint": "index.js"
     }
   },
   "rewrites": [
     {
+      "source": "/api",
+      "destination": {
+        "service": "server"
+      }
+    },
+    {
       "source": "/api/(.*)",
+      "destination": {
+        "service": "server"
+      }
+    },
+    {
+      "source": "/socket.io",
       "destination": {
         "service": "server"
       }
