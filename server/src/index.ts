@@ -55,11 +55,19 @@ const voiceService = new VoiceService(io, roomService);
 matchService.setVoiceService(voiceService);
 
 // Multer storage for voice transmissions
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+const storage: multer.StorageEngine = multer.diskStorage({
+  destination: (
+    req: Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, destination: string) => void
+  ) => {
     cb(null, AUDIO_UPLOAD_DIR);
   },
-  filename: (req, file, cb) => {
+  filename: (
+    req: Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, filename: string) => void
+  ) => {
     const ext = path.extname(file.originalname) || '.webm';
     cb(null, `voice_${Date.now()}_${Math.random().toString(36).substring(7)}${ext}`);
   },
