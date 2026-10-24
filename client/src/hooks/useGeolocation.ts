@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { PlayerLocation, GpsPermissionStatus } from '../types/game';
+import { PlayerLocation } from '../types/game';
+
+export type ExtendedGpsStatus =
+  | 'WAITING_FOR_PERMISSION'
+  | 'ACQUIRING_FIX'
+  | 'ACQUIRED'
+  | 'PERMISSION_DENIED'
+  | 'POSITION_UNAVAILABLE'
+  | 'TIMEOUT'
+  | 'UNSUPPORTED';
 
 export interface OneShotGpsDiagnostics {
   status: 'IDLE' | 'REQUESTING' | 'SUCCESS' | 'ERROR';
@@ -27,13 +36,20 @@ export function useGeolocation({
   stalenessThresholdSeconds = 45,
 }: UseGeolocationOptions = {}) {
   const [location, setLocation] = useState<PlayerLocation | null>(null);
-  const [gpsStatus, setGpsStatus] = useState<GpsPermissionStatus>('PROMPT');
+  const [gpsStatus, setGpsStatus] = useState<ExtendedGpsStatus>('WAITING_FOR_PERMISSION');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
   const [isStale, setIsStale] = useState<boolean>(false);
+  const [browserPermissionState, setBrowserPermissionState] = useState<string>('unknown');
+
   const lastUpdateRef = useRef<number>(0);
   const watchIdRef = useRef<number | null>(null);
 
-  // Dedicated one-shot diagnostics state for navigator.geolocation.getCurrentPosition()
+  // Store callback in ref to prevent infinite re-render / watchPosition cancellation loop
+  const onLocationUpdateRef = useRef(onLocationUpdate);
+  onLocationUpdateRef.current = onLocationUpdate;
+
+  // Dedicated one-shot diagnostics state for explicit navigator.geolocation.getCurrentPosition()
   const [oneShotGps, setOneShotGps] = useState<OneShotGpsDiagnostics>({
     status: 'IDLE',
     latitude: null,
@@ -48,54 +64,60 @@ export function useGeolocation({
     errorMessage: null,
   });
 
-  const handleSuccess = useCallback(
-    (pos: GeolocationPosition) => {
-      const now = Date.now();
-      lastUpdateRef.current = now;
+  const handleSuccess = useCallback((pos: GeolocationPosition) => {
+    const now = Date.now();
+    lastUpdateRef.current = now;
 
-      const playerLoc: PlayerLocation = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        accuracy: Math.round(pos.coords.accuracy),
-        heading: pos.coords.heading,
-        speed: pos.coords.speed,
-        timestamp: now,
-      };
+    const playerLoc: PlayerLocation = {
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      accuracy: Math.round(pos.coords.accuracy * 10) / 10,
+      heading: pos.coords.heading,
+      speed: pos.coords.speed,
+      timestamp: now,
+    };
 
-      setLocation(playerLoc);
-      setGpsStatus('GRANTED');
-      setErrorMessage(null);
-      setIsStale(false);
+    setLocation(playerLoc);
+    setGpsStatus('ACQUIRED');
+    setErrorMessage(null);
+    setErrorCode(null);
+    setIsStale(false);
 
-      if (onLocationUpdate) {
-        onLocationUpdate(playerLoc);
-      }
-    },
-    [onLocationUpdate]
-  );
+    if (onLocationUpdateRef.current) {
+      onLocationUpdateRef.current(playerLoc);
+    }
+  }, []);
 
   const handleError = useCallback((err: GeolocationPositionError) => {
+    setErrorCode(err.code);
     switch (err.code) {
       case err.PERMISSION_DENIED:
-        setGpsStatus('DENIED');
-        setErrorMessage('Location permission denied. Please enable GPS in browser settings.');
+        setGpsStatus('PERMISSION_DENIED');
+        setErrorMessage(
+          err.message || 'Location permission denied. Please allow location access in your browser settings.'
+        );
         break;
       case err.POSITION_UNAVAILABLE:
-        setGpsStatus('UNAVAILABLE');
-        setErrorMessage('GPS position unavailable. Ensure location services are turned on.');
+        setGpsStatus('POSITION_UNAVAILABLE');
+        setErrorMessage(
+          err.message || 'GPS position unavailable. Ensure device location services/GPS are enabled.'
+        );
         break;
       case err.TIMEOUT:
-        setGpsStatus('UNAVAILABLE');
-        setErrorMessage('Location request timed out. Checking GPS signal...');
+        setGpsStatus('TIMEOUT');
+        setErrorMessage(
+          err.message || 'GPS location request timed out. Attempting satellite signal acquisition...'
+        );
         break;
       default:
-        setErrorMessage(err.message);
+        setGpsStatus('POSITION_UNAVAILABLE');
+        setErrorMessage(err.message || 'Unknown geolocation error.');
     }
   }, []);
 
   // Explicit one-shot call to navigator.geolocation.getCurrentPosition()
   const requestOneShotGps = useCallback(() => {
-    if (!('geolocation' in navigator)) {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
       setOneShotGps({
         status: 'ERROR',
         latitude: null,
@@ -109,6 +131,7 @@ export function useGeolocation({
         errorName: 'UNSUPPORTED',
         errorMessage: 'Geolocation API is not supported in this browser.',
       });
+      setGpsStatus('UNSUPPORTED');
       return;
     }
 
@@ -120,7 +143,7 @@ export function useGeolocation({
           status: 'SUCCESS',
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
+          accuracy: Math.round(pos.coords.accuracy * 10) / 10,
           altitude: pos.coords.altitude,
           heading: pos.coords.heading,
           speed: pos.coords.speed,
@@ -130,7 +153,7 @@ export function useGeolocation({
           errorMessage: null,
         });
 
-        // Also update active player location
+        // Also update player location
         handleSuccess(pos);
       },
       (err: GeolocationPositionError) => {
@@ -150,7 +173,7 @@ export function useGeolocation({
           timestamp: Date.now(),
           errorCode: err.code,
           errorName,
-          errorMessage: err.message,
+          errorMessage: err.message || errorName,
         });
 
         handleError(err);
@@ -158,37 +181,96 @@ export function useGeolocation({
       {
         enableHighAccuracy: true,
         timeout: 15000,
-        maximumAge: 0, // Force fresh reading, never return stale cache
+        maximumAge: 0, // Force fresh hardware reading
       }
     );
   }, [handleSuccess, handleError]);
 
+  // Start continuous watching without teardown loops
   const startWatching = useCallback(() => {
-    if (!('geolocation' in navigator)) {
-      setGpsStatus('UNAVAILABLE');
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      setGpsStatus('UNSUPPORTED');
       setErrorMessage('Geolocation is not supported by your browser.');
       return;
     }
 
+    // Check browser permission status if supported
+    if ('permissions' in navigator && navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: 'geolocation' })
+        .then((permissionStatus) => {
+          setBrowserPermissionState(permissionStatus.state);
+          if (permissionStatus.state === 'denied') {
+            setGpsStatus('PERMISSION_DENIED');
+            setErrorMessage('Location permission is blocked in browser settings for this site.');
+          } else if (permissionStatus.state === 'granted') {
+            setGpsStatus((prev) => (prev === 'ACQUIRED' ? 'ACQUIRED' : 'ACQUIRING_FIX'));
+          } else if (permissionStatus.state === 'prompt') {
+            setGpsStatus('WAITING_FOR_PERMISSION');
+          }
+
+          permissionStatus.onchange = () => {
+            setBrowserPermissionState(permissionStatus.state);
+            if (permissionStatus.state === 'denied') {
+              setGpsStatus('PERMISSION_DENIED');
+              setErrorMessage('Location permission was denied in browser settings.');
+            } else if (permissionStatus.state === 'granted') {
+              setGpsStatus((prev) => (prev === 'ACQUIRED' ? 'ACQUIRED' : 'ACQUIRING_FIX'));
+              // Immediately request position once permission is granted
+              requestOneShotGps();
+            }
+          };
+        })
+        .catch(() => {
+          // Ignore permissions query errors on browsers that don't support it
+        });
+    }
+
+    // Call getCurrentPosition first for fast initial position lock
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        handleSuccess(pos);
+      },
+      (err) => {
+        // If high-accuracy timed out on initial request, retry once with standard accuracy
+        if (err.code === err.TIMEOUT) {
+          navigator.geolocation.getCurrentPosition(
+            handleSuccess,
+            handleError,
+            { enableHighAccuracy: false, timeout: 10000, maximumAge: 10000 }
+          );
+        } else {
+          handleError(err);
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 5000,
+      }
+    );
+
+    // Clear existing watch if any
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
     }
 
+    // Start continuous watchPosition
     watchIdRef.current = navigator.geolocation.watchPosition(
       handleSuccess,
       handleError,
       {
         enableHighAccuracy: true,
-        timeout: 15000,
+        timeout: 20000,
         maximumAge: 5000,
       }
     );
-  }, [handleSuccess, handleError]);
+  }, [handleSuccess, handleError, requestOneShotGps]);
 
+  // Mount effect: Starts watching once on mount and manages staleness
   useEffect(() => {
     startWatching();
 
-    // Staleness checking interval
     const staleInterval = setInterval(() => {
       if (lastUpdateRef.current > 0) {
         const secondsSinceLastUpdate = (Date.now() - lastUpdateRef.current) / 1000;
@@ -201,8 +283,9 @@ export function useGeolocation({
     }, 5000);
 
     return () => {
-      if (watchIdRef.current !== null) {
+      if (watchIdRef.current !== null && typeof window !== 'undefined' && 'geolocation' in navigator) {
         navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
       }
       clearInterval(staleInterval);
     };
@@ -212,7 +295,9 @@ export function useGeolocation({
     location,
     gpsStatus,
     errorMessage,
+    errorCode,
     isStale,
+    browserPermissionState,
     oneShotGps,
     requestOneShotGps,
     refreshGps: startWatching,

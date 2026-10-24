@@ -189,6 +189,21 @@ export class MatchService {
     const member = room.members[playerId];
     if (!member) return;
 
+    // Validate coordinate integrity
+    if (
+      !location ||
+      typeof location.latitude !== 'number' ||
+      typeof location.longitude !== 'number' ||
+      isNaN(location.latitude) ||
+      isNaN(location.longitude) ||
+      location.latitude < -90 ||
+      location.latitude > 90 ||
+      location.longitude < -180 ||
+      location.longitude > 180
+    ) {
+      return;
+    }
+
     member.lastLocation = location;
     member.gpsStatus = 'GRANTED';
 

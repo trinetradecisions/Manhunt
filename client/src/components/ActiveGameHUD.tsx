@@ -135,13 +135,21 @@ export default function ActiveGameHUD({
           {/* GPS Accuracy Pill */}
           <div
             className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-md ${
-              isGpsStale
+              !myLocation
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 animate-pulse'
+                : isGpsStale
                 ? 'bg-tactical-danger/20 border-tactical-danger text-tactical-danger animate-pulse'
                 : 'bg-surface/90 border-neutral-700 text-tactical-runner'
             }`}
           >
             <span>🛰️</span>
-            <span>{isGpsStale ? 'GPS STALE' : `±${myLocation?.accuracy ?? 0}m`}</span>
+            <span>
+              {!myLocation
+                ? 'ACQUIRING GPS'
+                : isGpsStale
+                ? 'GPS STALE'
+                : `±${myLocation.accuracy}m`}
+            </span>
           </div>
 
           {/* Safety Pause / Resume */}

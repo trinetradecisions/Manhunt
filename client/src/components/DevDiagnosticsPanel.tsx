@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { OneShotGpsDiagnostics } from '../hooks/useGeolocation';
+import { OneShotGpsDiagnostics, ExtendedGpsStatus } from '../hooks/useGeolocation';
 import { SocketDiagnostics } from '../hooks/useSocket';
-import { PlayerLocation, GpsPermissionStatus } from '../types/game';
+import { PlayerLocation } from '../types/game';
 
 interface DevDiagnosticsPanelProps {
   oneShotGps: OneShotGpsDiagnostics;
   onRequestOneShotGps: () => void;
   activeLocation: PlayerLocation | null;
-  gpsStatus: GpsPermissionStatus;
+  gpsStatus: ExtendedGpsStatus;
+  browserPermissionState?: string;
   isGpsStale: boolean;
   gpsErrorMessage: string | null;
   socketDiagnostics: SocketDiagnostics;
@@ -24,6 +25,7 @@ export default function DevDiagnosticsPanel({
   onRequestOneShotGps,
   activeLocation,
   gpsStatus,
+  browserPermissionState = 'unknown',
   isGpsStale,
   gpsErrorMessage,
   socketDiagnostics,
@@ -86,7 +88,7 @@ export default function DevDiagnosticsPanel({
               className={`w-2 h-2 rounded-full ${
                 isGpsOk
                   ? 'bg-emerald-400'
-                  : gpsStatus === 'DENIED'
+                  : gpsStatus === 'PERMISSION_DENIED'
                   ? 'bg-red-500'
                   : 'bg-amber-400 animate-pulse'
               }`}
@@ -181,9 +183,12 @@ export default function DevDiagnosticsPanel({
                     <span className="text-[10px] text-neutral-500 font-bold block uppercase">
                       Continuous Watch Status
                     </span>
-                    <span className="font-bold text-neutral-200">
-                      Permission: {gpsStatus} | Stale:{' '}
-                      <span className={isGpsStale ? 'text-amber-400' : 'text-emerald-400'}>
+                    <span className="font-bold text-neutral-200 block">
+                      State: <span className="text-amber-300">{gpsStatus}</span> (API: {browserPermissionState})
+                    </span>
+                    <span className="text-[10px] text-neutral-400">
+                      Stale:{' '}
+                      <span className={isGpsStale ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
                         {isGpsStale ? 'YES (>45s)' : 'NO'}
                       </span>
                     </span>

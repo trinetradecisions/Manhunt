@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useSocket } from '../hooks/useSocket';
 import { useGeolocation } from '../hooks/useGeolocation';
@@ -69,6 +69,7 @@ export default function Home() {
     gpsStatus,
     errorMessage: gpsErrorMessage,
     isStale,
+    browserPermissionState,
     oneShotGps,
     requestOneShotGps,
   } = useGeolocation({
@@ -78,6 +79,32 @@ export default function Home() {
       }
     },
   });
+
+  // Auto-center play zone on Host's actual GPS when first acquired (replaces London placeholder)
+  const hasAutoCenteredHostRef = useRef(false);
+  useEffect(() => {
+    if (
+      location &&
+      roomState &&
+      roomState.members[playerId]?.role === 'HOST' &&
+      roomState.state === 'LOBBY' &&
+      roomState.config.playZone.centerLat === 51.5074 &&
+      !hasAutoCenteredHostRef.current
+    ) {
+      hasAutoCenteredHostRef.current = true;
+      emit('room:update_config', {
+        roomCode,
+        requesterId: playerId,
+        config: {
+          playZone: {
+            ...roomState.config.playZone,
+            centerLat: location.latitude,
+            centerLng: location.longitude,
+          },
+        },
+      });
+    }
+  }, [location, roomState, playerId, roomCode, emit]);
 
   // Upgraded Radio hook with pre-send review & cancellation
   const {
@@ -220,6 +247,7 @@ export default function Home() {
           onRequestOneShotGps={requestOneShotGps}
           activeLocation={location}
           gpsStatus={gpsStatus}
+          browserPermissionState={browserPermissionState}
           isGpsStale={isStale}
           gpsErrorMessage={gpsErrorMessage}
           socketDiagnostics={socketDiagnostics}
@@ -302,6 +330,8 @@ export default function Home() {
             myRole={roomState.members[playerId]?.role || 'RUNNER'}
             members={roomState.members}
             myPlayerId={playerId}
+            gpsStatus={gpsStatus}
+            gpsErrorMessage={gpsErrorMessage}
             isGpsStale={isStale}
             chaserPings={chaserPings}
           />
@@ -379,6 +409,7 @@ export default function Home() {
         onRequestOneShotGps={requestOneShotGps}
         activeLocation={location}
         gpsStatus={gpsStatus}
+        browserPermissionState={browserPermissionState}
         isGpsStale={isStale}
         gpsErrorMessage={gpsErrorMessage}
         socketDiagnostics={socketDiagnostics}

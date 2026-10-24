@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import { PlayZone, PlayerLocation, PlayerMember } from '../types/game';
+import { ExtendedGpsStatus } from '../hooks/useGeolocation';
 
 interface TacticalMapProps {
   playZone: PlayZone;
@@ -10,6 +11,8 @@ interface TacticalMapProps {
   myRole: string;
   members: Record<string, PlayerMember>;
   myPlayerId: string;
+  gpsStatus?: ExtendedGpsStatus;
+  gpsErrorMessage?: string | null;
   isGpsStale?: boolean;
   chaserPings?: Array<{
     playerId: string;
@@ -27,6 +30,8 @@ export default function TacticalMap({
   myRole,
   members,
   myPlayerId,
+  gpsStatus = 'WAITING_FOR_PERMISSION',
+  gpsErrorMessage = null,
   isGpsStale = false,
   chaserPings = [],
 }: TacticalMapProps) {
@@ -34,6 +39,7 @@ export default function TacticalMap({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const zoneCircleRef = useRef<L.Circle | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const hasAutoCenteredRef = useRef<boolean>(false);
 
   const [tileError, setTileError] = useState(false);
   const [lastUpdateText, setLastUpdateText] = useState<string>('Searching...');
@@ -51,12 +57,16 @@ export default function TacticalMap({
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       });
 
+      // Start view centered on configured play zone preview
+      const initialLat = myLocation ? myLocation.latitude : playZone.centerLat;
+      const initialLng = myLocation ? myLocation.longitude : playZone.centerLng;
+
       const map = L.map(mapContainerRef.current, {
         zoomControl: false,
         attributionControl: true,
         maxZoom: 19,
         minZoom: 12,
-      }).setView([playZone.centerLat, playZone.centerLng], 16);
+      }).setView([initialLat, initialLng], 16);
 
       // OpenStreetMap standard tile provider with required attribution
       const osmTileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -73,6 +83,10 @@ export default function TacticalMap({
       const markersGroup = L.layerGroup().addTo(map);
       markersLayerRef.current = markersGroup;
       mapInstanceRef.current = map;
+
+      if (myLocation) {
+        hasAutoCenteredRef.current = true;
+      }
     }
 
     return () => {
@@ -82,6 +96,16 @@ export default function TacticalMap({
       }
     };
   }, []);
+
+  // Auto-center map on player when actual GPS fix is first acquired
+  useEffect(() => {
+    if (myLocation && mapInstanceRef.current && !hasAutoCenteredRef.current) {
+      mapInstanceRef.current.setView([myLocation.latitude, myLocation.longitude], 17, {
+        animate: true,
+      });
+      hasAutoCenteredRef.current = true;
+    }
+  }, [myLocation]);
 
   // Update Play Zone circle boundary
   useEffect(() => {
@@ -111,7 +135,7 @@ export default function TacticalMap({
     const isRunner = myRole === 'RUNNER';
     const playerAccentColor = isRunner ? '#10b981' : '#f59e0b';
 
-    // 1. Current Player Marker & Accuracy Circle
+    // 1. Current Player Marker & Accuracy Circle (ONLY if real GPS location is acquired)
     if (myLocation) {
       const myLatLng: L.LatLngTuple = [myLocation.latitude, myLocation.longitude];
 
@@ -151,7 +175,7 @@ export default function TacticalMap({
         minute: '2-digit',
         second: '2-digit',
       });
-      setLastUpdateText(`${timeStr} (±${Math.round(myLocation.accuracy)}m)`);
+      setLastUpdateText(`${timeStr} (±${myLocation.accuracy}m)`);
     }
 
     // 2. Teammate Markers (Filtered by Server Authorization)
@@ -247,41 +271,104 @@ export default function TacticalMap({
       {/* Real Interactive Leaflet + OpenStreetMap Map */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* GPS Status & Last Update Floating Pill */}
-      <div className="absolute top-16 left-4 z-[400] pointer-events-none">
-        <div className="bg-surface-elevated/90 backdrop-blur-md border border-neutral-700/80 px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2 text-[10px] font-mono">
+      {/* Map Preview Indicator (Rendered when real GPS location is not yet acquired) */}
+      {!myLocation && (
+        <div className="absolute top-16 right-4 z-[400] pointer-events-none">
+          <div className="bg-neutral-900/90 border border-amber-500/70 text-amber-300 px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
+            <span>🗺️</span>
+            <span>PREVIEWING PLAY ZONE (NOT YOUR LOCATION)</span>
+          </div>
+        </div>
+      )}
+
+      {/* GPS Status & Position Floating Pill */}
+      <div className="absolute top-16 left-4 z-[400] pointer-events-none max-w-xs">
+        <div className="bg-surface-elevated/95 backdrop-blur-md border border-neutral-700/80 px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2 text-[10px] font-mono">
           <span
             className={`w-2 h-2 rounded-full ${
-              !myLocation
-                ? 'bg-red-500 animate-ping'
-                : isGpsStale
-                ? 'bg-amber-400 animate-pulse'
-                : 'bg-emerald-400'
+              myLocation
+                ? isGpsStale
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-emerald-400'
+                : gpsStatus === 'PERMISSION_DENIED'
+                ? 'bg-red-500'
+                : gpsStatus === 'ACQUIRING_FIX'
+                ? 'bg-cyan-400 animate-ping'
+                : 'bg-amber-400 animate-pulse'
             }`}
           />
-          <span className="text-neutral-300">
-            {!myLocation
-              ? 'GPS: ACQUIRING LOCK'
-              : isGpsStale
-              ? 'GPS: STALE SIGNAL'
-              : `GPS: ${lastUpdateText}`}
+          <span className="text-neutral-200 font-bold truncate">
+            {myLocation
+              ? isGpsStale
+                ? `GPS STALE (>45s): Lat ${myLocation.latitude.toFixed(5)}, Lng ${myLocation.longitude.toFixed(5)}`
+                : `GPS LOCKED: Lat ${myLocation.latitude.toFixed(5)}, Lng ${myLocation.longitude.toFixed(5)} (±${myLocation.accuracy}m)`
+              : gpsStatus === 'WAITING_FOR_PERMISSION'
+              ? 'GPS: WAITING FOR PERMISSION'
+              : gpsStatus === 'ACQUIRING_FIX'
+              ? 'GPS: ACQUIRING HARDWARE FIX...'
+              : gpsStatus === 'PERMISSION_DENIED'
+              ? 'GPS: PERMISSION BLOCKED'
+              : gpsStatus === 'TIMEOUT'
+              ? 'GPS: REQUEST TIMED OUT'
+              : 'GPS: POSITION UNAVAILABLE'}
           </span>
         </div>
       </div>
 
-      {/* Warning Banner if No GPS or Stale */}
+      {/* Explicit Geolocation State Banner (Shows real error or helpful guidance) */}
       {!myLocation && (
-        <div className="absolute top-28 left-4 right-4 z-[400] bg-surface-elevated/95 border border-amber-500/70 p-3 rounded-2xl shadow-xl backdrop-blur-md text-xs">
-          <div className="flex items-center gap-2 text-amber-400 font-bold">
-            <span>📡</span>
-            <span>Waiting for GPS Location</span>
-          </div>
-          <p className="text-[11px] text-neutral-300 mt-1 leading-relaxed">
-            Please allow browser location permissions when prompted to enable live tactical position tracking.
-          </p>
+        <div className="absolute top-28 left-4 right-4 z-[400] bg-surface-elevated/95 border border-neutral-700 p-3 rounded-2xl shadow-xl backdrop-blur-md text-xs">
+          {gpsStatus === 'WAITING_FOR_PERMISSION' && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 font-bold">
+                <span>📍</span>
+                <span>Waiting for Browser Location Permission</span>
+              </div>
+              <p className="text-[11px] text-neutral-300 leading-relaxed">
+                Please tap <strong>&ldquo;Allow&rdquo;</strong> on your browser&apos;s location prompt to enable outdoor GPS pursuit tracking.
+              </p>
+            </div>
+          )}
+
+          {gpsStatus === 'ACQUIRING_FIX' && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-cyan-400 font-bold">
+                <span className="animate-spin">🔄</span>
+                <span>Permission Granted — Acquiring GPS Satellite Fix</span>
+              </div>
+              <p className="text-[11px] text-neutral-300 leading-relaxed">
+                Device GPS is active and calculating coordinates. Stand near a window or outdoors with Wi-Fi / location services enabled.
+              </p>
+            </div>
+          )}
+
+          {gpsStatus === 'PERMISSION_DENIED' && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-red-400 font-bold">
+                <span>❌</span>
+                <span>Location Permission Denied (Code 1)</span>
+              </div>
+              <p className="text-[11px] text-neutral-300 leading-relaxed">
+                {gpsErrorMessage || 'Location access is blocked. Click the lock/settings icon in your browser address bar and enable Location for this site.'}
+              </p>
+            </div>
+          )}
+
+          {(gpsStatus === 'POSITION_UNAVAILABLE' || gpsStatus === 'TIMEOUT' || gpsStatus === 'UNSUPPORTED') && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 font-bold">
+                <span>⚠️</span>
+                <span>GPS Error: {gpsStatus}</span>
+              </div>
+              <p className="text-[11px] text-neutral-300 leading-relaxed">
+                {gpsErrorMessage || 'Position calculation timed out or device sensors are unavailable.'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
+      {/* Stale GPS Banner */}
       {isGpsStale && myLocation && (
         <div className="absolute top-28 left-4 right-4 z-[400] bg-surface-elevated/95 border border-amber-500/70 p-3 rounded-2xl shadow-xl backdrop-blur-md text-xs">
           <div className="flex items-center gap-2 text-amber-400 font-bold">
@@ -289,7 +376,7 @@ export default function TacticalMap({
             <span>Stale GPS Fix (&gt;45s old)</span>
           </div>
           <p className="text-[11px] text-neutral-300 mt-1 leading-relaxed">
-            Your location has not refreshed recently. Check that your device has a clear view of the sky and mobile data is active.
+            Your location has not refreshed recently. Check device battery saver settings and ensure clear view of the sky.
           </p>
         </div>
       )}
@@ -313,6 +400,7 @@ export default function TacticalMap({
           onClick={handleRecenter}
           aria-label="Recenter Map"
           className="w-10 h-10 bg-surface-elevated/90 hover:bg-neutral-800 border border-neutral-700 text-neutral-100 rounded-xl shadow-lg flex items-center justify-center text-sm font-bold active:scale-95 transition-all"
+          title={myLocation ? "Recenter on My GPS Location" : "Center on Play Zone Preview"}
         >
           📍
         </button>
