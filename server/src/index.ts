@@ -22,11 +22,17 @@ import { VoiceService } from './services/voiceService.js';
 import { PlayerStatsService } from './services/playerStatsService.js';
 
 const PORT = process.env.PORT || 4000;
-const AUDIO_UPLOAD_DIR = path.join(__dirname, '../uploads/audio');
+const AUDIO_UPLOAD_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'manhunt', 'uploads', 'audio')
+  : path.join(__dirname, '../uploads/audio');
 
-// Ensure upload directory exists
-if (!fs.existsSync(AUDIO_UPLOAD_DIR)) {
-  fs.mkdirSync(AUDIO_UPLOAD_DIR, { recursive: true });
+// Ensure upload directory exists safely (prevent crashing on read-only environments)
+try {
+  if (!fs.existsSync(AUDIO_UPLOAD_DIR)) {
+    fs.mkdirSync(AUDIO_UPLOAD_DIR, { recursive: true });
+  }
+} catch (err) {
+  console.warn('[Storage] Could not create upload directory:', err);
 }
 
 const app = express();
@@ -42,7 +48,26 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
-app.use(cors());
+// Permissive CORS allowing local development, *.vercel.app, and configured domains
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.endsWith('.vercel.app') ||
+      origin === 'https://manhunt-murex.vercel.app'
+    ) {
+      return callback(null, true);
+    }
+    const configured = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : [];
+    if (configured.includes('*') || configured.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Initialize core services
@@ -570,6 +595,20 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[Manhunt Server] Running on http://localhost:${PORT}`);
+// Bridge Socket.IO engine to handle HTTP requests (handshake/polling) in serverless environments
+app.all(['/socket.io', '/socket.io/*'], (req: Request, res: Response) => {
+  if (io && io.engine) {
+    (io.engine as any).handleRequest(req, res);
+  } else {
+    res.status(503).json({ error: 'Socket engine initializing' });
+  }
 });
+
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`[Manhunt Server] Running on http://localhost:${PORT}`);
+  });
+}
+
+export { app, server, io };
+export default app;

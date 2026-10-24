@@ -6,7 +6,9 @@ import { calculateHaversineDistance } from '../engine/geo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const STATS_FILE = path.join(__dirname, '../../data/player_stats.json');
+const STATS_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'manhunt', 'data', 'player_stats.json')
+  : path.join(__dirname, '../../data/player_stats.json');
 
 // GPS validation constraints
 const MAX_VALID_ACCURACY_METERS = 35; // Readings with worse accuracy are ignored for distance accumulation
