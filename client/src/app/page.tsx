@@ -8,6 +8,7 @@ import { useRadio } from '../hooks/useRadio';
 import LobbyView from '../components/LobbyView';
 import ActiveGameHUD from '../components/ActiveGameHUD';
 import MatchResultsModal from '../components/MatchResultsModal';
+import DevDiagnosticsPanel from '../components/DevDiagnosticsPanel';
 
 // Dynamic import of TacticalMap (Leaflet + OpenStreetMap) to prevent SSR window reference crashes
 const TacticalMap = dynamic(() => import('../components/TacticalMap'), {
@@ -54,13 +55,23 @@ export default function Home() {
     pendingCatch,
     incomingRadio,
     chaserPings,
+    diagnostics: socketDiagnostics,
+    measurePing,
+    manualReconnect,
     clearAlert,
     dismissRadio,
     emit,
   } = useSocket(roomCode, playerId, nickname);
 
-  // Geolocation hook with auto socket location broadcast
-  const { location, isStale } = useGeolocation({
+  // Geolocation hook with auto socket location broadcast and one-shot diagnostics
+  const {
+    location,
+    gpsStatus,
+    errorMessage: gpsErrorMessage,
+    isStale,
+    oneShotGps,
+    requestOneShotGps,
+  } = useGeolocation({
     onLocationUpdate: (loc) => {
       if (roomCode && playerId) {
         emit('location:update', { roomCode, playerId, location: loc });
@@ -202,6 +213,21 @@ export default function Home() {
           <p>Requires browser GPS and microphone permissions.</p>
           <p className="text-neutral-600">Built for outdoor parks, campuses & safe open zones.</p>
         </div>
+
+        {/* Development-Only Diagnostics Panel */}
+        <DevDiagnosticsPanel
+          oneShotGps={oneShotGps}
+          onRequestOneShotGps={requestOneShotGps}
+          activeLocation={location}
+          gpsStatus={gpsStatus}
+          isGpsStale={isStale}
+          gpsErrorMessage={gpsErrorMessage}
+          socketDiagnostics={socketDiagnostics}
+          onMeasurePing={measurePing}
+          onManualReconnect={manualReconnect}
+          roomCode={roomCode}
+          playerId={playerId}
+        />
       </main>
     );
   }
@@ -346,6 +372,21 @@ export default function Home() {
           }
         />
       )}
+
+      {/* Development-Only Diagnostics Panel */}
+      <DevDiagnosticsPanel
+        oneShotGps={oneShotGps}
+        onRequestOneShotGps={requestOneShotGps}
+        activeLocation={location}
+        gpsStatus={gpsStatus}
+        isGpsStale={isStale}
+        gpsErrorMessage={gpsErrorMessage}
+        socketDiagnostics={socketDiagnostics}
+        onMeasurePing={measurePing}
+        onManualReconnect={manualReconnect}
+        roomCode={roomCode}
+        playerId={playerId}
+      />
     </div>
   );
 }

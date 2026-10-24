@@ -27,7 +27,10 @@ const io = new Server(server, {
   cors: {
     origin: '*', // Allow local development and mobile network IP testing
     methods: ['GET', 'POST'],
+    credentials: true,
   },
+  pingTimeout: 20000,
+  pingInterval: 25000,
 });
 
 app.use(cors());
@@ -264,6 +267,18 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: result.error });
     }
     if (typeof callback === 'function') callback(result);
+  });
+
+  // Diagnostics Ping handler for round-trip latency measurement
+  socket.on('diagnostics:ping', (_data, callback) => {
+    if (typeof callback === 'function') {
+      callback({ received: true, serverTimestamp: Date.now() });
+    }
+  });
+
+  // Track client disconnection reason
+  socket.on('disconnect', (reason) => {
+    console.log(`[Socket.IO] Client disconnected: ${socket.id} (reason: ${reason})`);
   });
 });
 
