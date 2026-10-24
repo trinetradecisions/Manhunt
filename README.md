@@ -80,7 +80,7 @@ http://localhost:3000
 cd server
 npm run test
 ```
-All 13 unit and integration tests covering geospatial calculations, state machine transitions, catch proximity verification, team radio isolation, and safety pauses will execute.
+All 14 unit and integration tests covering geospatial calculations, state machine transitions, catch proximity verification, dynamic catch codes, team radio isolation, and safety pauses will execute.
 
 To test the production build:
 ```bash

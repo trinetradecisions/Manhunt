@@ -10,8 +10,8 @@ out/
 build/
 
 # Ephemeral uploads & logs
-uploads/audio/
-uploads/audio_test/
+uploads/
+**/uploads/
 *.log
 
 # Environment variables & local secrets

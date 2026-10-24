@@ -7,17 +7,18 @@ This audit evaluates the current Manhunt Web application state, identifies techn
 ## 1. Audit Summary & Findings
 
 ### 1.1 Maps & Geospatial System
-- **Current State**: Uses Leaflet (`leaflet` v1.9.4) with CARTO dark raster tiles.
-- **Identified Deficiencies**:
-  - Requires Leaflet CSS stylesheet injection and dynamic SSR disabling (`ssr: false`) to avoid server crash.
-  - No native Google Maps support or vector rendering.
-  - Lacks dedicated Google Cloud API key configuration flow and graceful fallback mechanisms for keyless development.
-- **Prescribed Remediation**:
-  - Integrate `@googlemaps/js-api-loader` with `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
-  - Provide a high-visibility, informative Google Maps API setup banner and guidance when unconfigured.
-  - Support a seamless local development fallback mode so offline and keyless developers can test without blocking.
-  - Render custom SVG tactical markers (Player, Teammates, Chaser Radar Pings) and `google.maps.Circle` for the Play Zone.
-  - Implement dynamic recenter controls, zoom controls, and boundary buffer alerts.
+- **Current State**: Uses Leaflet (`leaflet` v1.9.4) with standard OpenStreetMap raster tiles.
+- **Identified Deficiencies in Previous Implementations**:
+  - Unnecessary dependency on Google Maps JavaScript API requiring paid billing and complex browser referrer restrictions.
+  - Required simulated canvas fallbacks when Google Cloud API credentials were missing.
+- **Prescribed Remediation (Implemented)**:
+  - Direct integration with Leaflet and official OpenStreetMap tiles (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`).
+  - Visible, compliant OpenStreetMap attribution on the map.
+  - Zero API key requirement for local development and playtesting.
+  - High-contrast tactical DivIcons with role tags (Runner emerald `R`, Chaser amber `C`, Radar ping pulsing red `!`).
+  - Circular playable boundary (`L.circle`) with red border, 20m warning buffer, and accuracy circles.
+  - Client-side dynamic loading (`ssr: false`) to avoid Next.js 15 server crashes.
+  - Touch-friendly floating control dock with Recenter (`📍`) and Zoom (`+` / `−`).
 
 ---
 
@@ -73,7 +74,7 @@ This audit evaluates the current Manhunt Web application state, identifies techn
 | :--- | :--- | :--- |
 | **Landing View** | Basic form in `page.tsx` | Redesign with tactical operative card, room join/create tabs, quick-start guide. |
 | **Lobby Screen** | `LobbyView.tsx` | Redesign with shareable code card, individual head-start config, GPS readiness list. |
-| **Tactical Map** | `TacticalMap.tsx` (Leaflet) | Rewrite to Google Maps JavaScript API with keyless development fallback. |
+| **Tactical Map** | `TacticalMap.tsx` (Leaflet + OpenStreetMap) | Interactive raster map with OSM attribution, dynamic zoom/recenter, accuracy buffer, and custom tactical markers. |
 | **Active Game HUD** | `ActiveGameHUD.tsx` | Compact floating top bar, role-specific action dock, dynamic catch code display. |
 | **Catch Modal** | Basic confirm in `ActiveGameHUD` | Redesign into dedicated component with proximity tag + 4-digit Catch Code input. |
 | **Safety Pause Modal**| Small header button | Redesign into full-screen emergency alert modal with regroup instructions. |

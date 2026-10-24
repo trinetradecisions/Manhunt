@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: Production-Quality Redesign, Google Maps Integration & Full Functionality Verified
+Last updated: OpenStreetMap & Leaflet Integration, Tactical UI Redesign & Full Functionality Verified
 
 ## Feature Implementation Status
 
@@ -14,7 +14,7 @@ Last updated: Production-Quality Redesign, Google Maps Integration & Full Functi
 | **Lobby & Room Code Generator** | Complete and tested | Collision-free 6-char generator, shareable invite links, guest sessions. |
 | **Team Management & Role Sanitization**| Complete and tested | Host, Runner, Chaser, Referee; role-based field sanitization (runner catch codes protected). |
 | **Individual Runner Head-Starts** | Complete and tested | Configurable per runner or global countdown; server-authoritative timer tracking. |
-| **Google Maps Integration** | Complete and tested | Google Maps JavaScript API with `@googlemaps/js-api-loader`, dark tactical styling, SVG player markers, circle boundaries, and resilient keyless development fallback canvas. |
+| **OpenStreetMap & Leaflet Integration** | Complete and tested | Real OpenStreetMap raster tiles, standard attribution, high-contrast tactical DivIcons, accuracy radius circle, circular boundary, and touch-friendly recenter/zoom dock. Zero API keys required. |
 | **Browser Geolocation & Staleness** | Complete and tested | High accuracy GPS tracking, permission state handling (not requested, requesting, granted, denied), stale GPS amber alerts (>45s). |
 | **Dual Catch Validation Protocol** | Complete and tested | Proximity Tag (<25m with GPS accuracy tolerance) + Dynamic 4-digit Runner Catch Code with 3-attempt brute-force rate limiting. |
 | **Store-and-Listen Team Radio** | Complete and tested | Record audio with pre-send playback review and cancel, private team uploads, `LISTEN` / `IGNORE` controls, haptic vibration alerts, and auto-purge retention. |

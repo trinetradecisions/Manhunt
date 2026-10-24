@@ -9,12 +9,12 @@ import LobbyView from '../components/LobbyView';
 import ActiveGameHUD from '../components/ActiveGameHUD';
 import MatchResultsModal from '../components/MatchResultsModal';
 
-// Dynamic import of GoogleTacticalMap to prevent SSR window reference crashes
-const GoogleTacticalMap = dynamic(() => import('../components/GoogleTacticalMap'), {
+// Dynamic import of TacticalMap (Leaflet + OpenStreetMap) to prevent SSR window reference crashes
+const TacticalMap = dynamic(() => import('../components/TacticalMap'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full min-h-[350px] flex items-center justify-center bg-background text-neutral-500 text-xs font-mono">
-      INITIALIZING SATELLITE COMMAND RADAR...
+      INITIALIZING TACTICAL RADAR MAP...
     </div>
   ),
 });
@@ -268,14 +268,15 @@ export default function Home() {
           }
         />
       ) : (
-        /* Fullscreen Interactive Google Tactical Map & HUD */
+        /* Fullscreen Interactive Leaflet Tactical Map & HUD */
         <div className="relative w-full h-full">
-          <GoogleTacticalMap
+          <TacticalMap
             playZone={roomState.config.playZone}
             myLocation={location}
             myRole={roomState.members[playerId]?.role || 'RUNNER'}
             members={roomState.members}
             myPlayerId={playerId}
+            isGpsStale={isStale}
             chaserPings={chaserPings}
           />
 
