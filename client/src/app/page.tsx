@@ -53,23 +53,27 @@ export default function Home() {
 
   // Initialize or restore guest session from localStorage & URL
   useEffect(() => {
-    let storedId = localStorage.getItem('manhunt_player_id');
+    const params = new URLSearchParams(window.location.search);
+    const queryPlayerId = params.get('playerId');
+    const queryNickname = params.get('nickname');
+    const queryRoom = params.get('room');
+
+    let storedId = queryPlayerId || localStorage.getItem('manhunt_player_id');
     if (!storedId) {
       storedId = 'p_' + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem('manhunt_player_id', storedId);
     }
+    localStorage.setItem('manhunt_player_id', storedId);
     setPlayerId(storedId);
 
     const storedNick =
-      localStorage.getItem('manhunt_nickname') || 'Operative_' + storedId.slice(-4);
+      queryNickname || localStorage.getItem('manhunt_nickname') || 'Operative_' + storedId.slice(-4);
+    localStorage.setItem('manhunt_nickname', storedNick);
     setNickname(storedNick);
 
-    const params = new URLSearchParams(window.location.search);
-    const queryRoom = params.get('room');
     const storedActiveRoom = localStorage.getItem('manhunt_active_room_code');
-
     const roomToRestore = (queryRoom || storedActiveRoom || '').trim().toUpperCase();
     if (roomToRestore) {
+      localStorage.setItem('manhunt_active_room_code', roomToRestore);
       setInputCode(roomToRestore);
       setRoomCode(roomToRestore);
       setIsRestoringSession(true);
