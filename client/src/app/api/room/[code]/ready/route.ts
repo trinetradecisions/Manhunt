@@ -19,10 +19,7 @@ export async function POST(
     }
 
     if (body.existingRoom || body.room) {
-      const existing = await GameStateStore.getRoom(code);
-      if (!existing) {
-        await GameStateStore.hydrateRoom(body.existingRoom || body.room, playerId);
-      }
+      await GameStateStore.hydrateRoom(body.existingRoom || body.room, playerId);
     }
 
     const res = await GameStateStore.setReady(code, playerId, isReady, gpsStatus, accuracy);

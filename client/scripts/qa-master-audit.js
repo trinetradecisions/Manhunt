@@ -111,21 +111,25 @@ async function runIteration(iterationNumber, targetPlayerCount) {
   if (autoData.room) currentRoom = autoData.room;
   console.log(`✓ Auto-Assignment: ${autoData.chasersCount} Chasers, ${autoData.runnersCount} Runners (v${autoData.room?.version})`);
 
-  // Manual move test: swap player 2 to other team
-  const targetPid = playerIds[1];
-  const initialTeam = currentRoom.members[targetPid].team;
-  const newTeam = initialTeam === 'RUNNERS' ? 'CHASERS' : 'RUNNERS';
+  // Manual move test: pick a player from the larger team and move to the other team
+  const runnersList = Object.values(currentRoom.members).filter((m) => m.team === 'RUNNERS');
+  const chasersList = Object.values(currentRoom.members).filter((m) => m.team === 'CHASERS');
+  const donorTeam = runnersList.length >= chasersList.length ? 'RUNNERS' : 'CHASERS';
+  const recipientTeam = donorTeam === 'RUNNERS' ? 'CHASERS' : 'RUNNERS';
+  const donor = (donorTeam === 'RUNNERS' ? runnersList : chasersList).find((m) => m.id !== hostId) || Object.values(currentRoom.members)[1];
+  const targetPid = donor.id;
+
   const manualRes = await fetch(`${BASE_URL}/api/room/${roomCode}/team/assign`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hostId, targetPlayerId: targetPid, team: newTeam, existingRoom: currentRoom }),
+    body: JSON.stringify({ hostId, targetPlayerId: targetPid, team: recipientTeam, existingRoom: currentRoom }),
   });
   const manualData = await manualRes.json();
-  if (!manualData.success || manualData.room?.members[targetPid]?.team !== newTeam) {
+  if (!manualData.success || manualData.room?.members[targetPid]?.team !== recipientTeam) {
     throw new Error(`Manual team reassignment failed`);
   }
   if (manualData.room) currentRoom = manualData.room;
-  console.log(`✓ Manual & Drag-Drop Assignment: Moved ${targetPid} from ${initialTeam} to ${newTeam} successfully`);
+  console.log(`✓ Manual & Drag-Drop Assignment: Moved ${targetPid} from ${donorTeam} to ${recipientTeam} successfully`);
 
   // 5. Config & Command Deck Update
   const configRes = await fetch(`${BASE_URL}/api/room/${roomCode}/config`, {

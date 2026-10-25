@@ -18,10 +18,7 @@ export async function POST(
     }
 
     if (body.existingRoom || body.room) {
-      const existing = await GameStateStore.getRoom(code);
-      if (!existing) {
-        await GameStateStore.hydrateRoom(body.existingRoom || body.room, hostId);
-      }
+      await GameStateStore.hydrateRoom(body.existingRoom || body.room, hostId);
     }
 
     const res = await GameStateStore.randomizeBases(code, hostId, count || 3);
