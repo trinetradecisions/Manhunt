@@ -297,13 +297,14 @@ export default function TacticalMap({
     if (myLocation) {
       const myLatLng: L.LatLngTuple = [myLocation.latitude, myLocation.longitude];
 
-      // Accuracy radius buffer
+      // Accuracy radius buffer (distinct from boundary with fine dashed stroke)
       L.circle(myLatLng, {
         radius: Math.max(myLocation.accuracy, 3),
         color: playerAccentColor,
-        weight: 1.5,
+        weight: 1.2,
+        dashArray: '3, 4',
         fillColor: playerAccentColor,
-        fillOpacity: 0.18,
+        fillOpacity: 0.12,
       }).addTo(markersLayerRef.current);
 
       // High-contrast custom tactical player pin
@@ -506,119 +507,9 @@ export default function TacticalMap({
       {/* Real Interactive Leaflet + OpenStreetMap Map */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Map Preview Indicator (Rendered when real GPS location is not yet acquired) */}
-      {!myLocation && (
-        <div className="absolute top-16 right-4 z-[400] pointer-events-none">
-          <div className="bg-neutral-900/90 border border-amber-500/70 text-amber-300 px-3 py-1.5 rounded-xl text-[10px] font-mono font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
-            <Compass className="w-3.5 h-3.5 text-amber-400" />
-            <span>PREVIEWING PLAY ZONE (NOT YOUR LOCATION)</span>
-          </div>
-        </div>
-      )}
-
-      {/* GPS Status & Position Floating Pill */}
-      <div className="absolute top-16 left-4 z-[400] pointer-events-none max-w-xs">
-        <div className="bg-surface-elevated/95 backdrop-blur-md border border-neutral-700/80 px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-2 text-[10px] font-mono">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              myLocation
-                ? isGpsStale
-                  ? 'bg-amber-400 animate-pulse'
-                  : 'bg-emerald-400'
-                : gpsStatus === 'PERMISSION_DENIED'
-                ? 'bg-red-500'
-                : gpsStatus === 'ACQUIRING_FIX'
-                ? 'bg-cyan-400 animate-ping'
-                : 'bg-amber-400 animate-pulse'
-            }`}
-          />
-          <span className="text-neutral-200 font-bold truncate">
-            {myLocation
-              ? isGpsStale
-                ? `GPS STALE (>45s): Lat ${myLocation.latitude.toFixed(5)}, Lng ${myLocation.longitude.toFixed(5)}`
-                : `GPS LOCKED: Lat ${myLocation.latitude.toFixed(5)}, Lng ${myLocation.longitude.toFixed(5)} (±${myLocation.accuracy}m)`
-              : gpsStatus === 'WAITING_FOR_PERMISSION'
-              ? 'GPS: WAITING FOR PERMISSION'
-              : gpsStatus === 'ACQUIRING_FIX'
-              ? 'GPS: ACQUIRING HARDWARE FIX...'
-              : gpsStatus === 'PERMISSION_DENIED'
-              ? 'GPS: PERMISSION BLOCKED'
-              : gpsStatus === 'TIMEOUT'
-              ? 'GPS: REQUEST TIMED OUT'
-              : 'GPS: POSITION UNAVAILABLE'}
-          </span>
-        </div>
-      </div>
-
-      {/* Explicit Geolocation State Banner (Shows real error or helpful guidance) */}
-      {!myLocation && (
-        <div className="absolute top-28 left-4 right-4 z-[400] bg-surface-elevated/95 border border-neutral-700 p-3.5 rounded-2xl shadow-xl backdrop-blur-md text-xs">
-          {gpsStatus === 'WAITING_FOR_PERMISSION' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-amber-400 font-bold">
-                <Navigation className="w-4 h-4" />
-                <span>Waiting for Browser Location Permission</span>
-              </div>
-              <p className="text-[11px] text-neutral-300 leading-relaxed">
-                Please tap <strong>&ldquo;Allow&rdquo;</strong> on your browser&apos;s location prompt to enable outdoor GPS pursuit tracking.
-              </p>
-            </div>
-          )}
-
-          {gpsStatus === 'ACQUIRING_FIX' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-cyan-400 font-bold">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Permission Granted — Acquiring GPS Satellite Fix</span>
-              </div>
-              <p className="text-[11px] text-neutral-300 leading-relaxed">
-                Device GPS is active and calculating coordinates. Stand near a window or outdoors with Wi-Fi / location services enabled.
-              </p>
-            </div>
-          )}
-
-          {gpsStatus === 'PERMISSION_DENIED' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-red-400 font-bold">
-                <AlertCircle className="w-4 h-4" />
-                <span>Location Permission Denied (Code 1)</span>
-              </div>
-              <p className="text-[11px] text-neutral-300 leading-relaxed">
-                {gpsErrorMessage || 'Location access is blocked. Click the lock/settings icon in your browser address bar and enable Location for this site.'}
-              </p>
-            </div>
-          )}
-
-          {(gpsStatus === 'POSITION_UNAVAILABLE' || gpsStatus === 'TIMEOUT' || gpsStatus === 'UNSUPPORTED') && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2 text-amber-400 font-bold">
-                <AlertTriangle className="w-4 h-4" />
-                <span>GPS Error: {gpsStatus}</span>
-              </div>
-              <p className="text-[11px] text-neutral-300 leading-relaxed">
-                {gpsErrorMessage || 'Position calculation timed out or device sensors are unavailable.'}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Stale GPS Banner */}
-      {isGpsStale && myLocation && (
-        <div className="absolute top-28 left-4 right-4 z-[400] bg-surface-elevated/95 border border-amber-500/70 p-3.5 rounded-2xl shadow-xl backdrop-blur-md text-xs">
-          <div className="flex items-center gap-2 text-amber-400 font-bold">
-            <AlertTriangle className="w-4 h-4" />
-            <span>Stale GPS Fix (&gt;45s old)</span>
-          </div>
-          <p className="text-[11px] text-neutral-300 mt-1 leading-relaxed">
-            Your location has not refreshed recently. Check device battery saver settings and ensure clear view of the sky.
-          </p>
-        </div>
-      )}
-
       {/* Tile loading error alert */}
       {tileError && (
-        <div className="absolute bottom-28 left-4 right-4 z-[400] bg-neutral-900/95 border border-red-500/70 p-2.5 rounded-xl text-xs text-red-300 flex items-center justify-between shadow-xl">
+        <div className="absolute top-20 left-4 right-4 z-[400] bg-neutral-900/95 border border-red-500/70 p-2.5 rounded-xl text-xs text-red-300 flex items-center justify-between shadow-xl">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
             <span>OpenStreetMap tile network slow or offline. Cached tiles will display.</span>
@@ -632,27 +523,27 @@ export default function TacticalMap({
         </div>
       )}
 
-      {/* Floating Tactical Controls Dock */}
-      <div className="absolute bottom-20 right-4 z-[450] flex flex-col gap-2 pointer-events-auto">
+      {/* Floating Tactical Controls Dock (Zoom & Recenter) */}
+      <div className="absolute bottom-36 sm:bottom-32 right-3 sm:right-4 z-[400] flex flex-col gap-2 pointer-events-auto">
         <button
           onClick={handleRecenter}
           aria-label="Recenter Map"
-          className="w-11 h-11 bg-surface-elevated/95 hover:bg-neutral-800 border border-neutral-700 text-neutral-100 rounded-2xl shadow-lg flex items-center justify-center text-sm font-bold active:scale-95 transition-all"
+          className="w-11 h-11 bg-[#1F2731]/95 hover:bg-[#293440] border border-[#3B4652] text-white rounded-2xl shadow-xl flex items-center justify-center text-sm font-bold active:scale-95 transition-all backdrop-blur-md"
           title={myLocation ? "Recenter on My GPS Location" : "Center on Play Zone Preview"}
         >
-          <Navigation className="w-5 h-5 text-tactical-lime" />
+          <Navigation className="w-5 h-5 text-[#4CC38A]" />
         </button>
         <button
           onClick={() => handleZoom(1)}
           aria-label="Zoom In"
-          className="w-11 h-11 bg-surface-elevated/95 hover:bg-neutral-800 border border-neutral-700 text-neutral-100 rounded-2xl shadow-lg flex items-center justify-center font-bold active:scale-95 transition-all"
+          className="w-11 h-11 bg-[#1F2731]/95 hover:bg-[#293440] border border-[#3B4652] text-white rounded-2xl shadow-xl flex items-center justify-center font-bold active:scale-95 transition-all backdrop-blur-md"
         >
           <Plus className="w-5 h-5" />
         </button>
         <button
           onClick={() => handleZoom(-1)}
           aria-label="Zoom Out"
-          className="w-11 h-11 bg-surface-elevated/95 hover:bg-neutral-800 border border-neutral-700 text-neutral-100 rounded-2xl shadow-lg flex items-center justify-center font-bold active:scale-95 transition-all"
+          className="w-11 h-11 bg-[#1F2731]/95 hover:bg-[#293440] border border-[#3B4652] text-white rounded-2xl shadow-xl flex items-center justify-center font-bold active:scale-95 transition-all backdrop-blur-md"
         >
           <Minus className="w-5 h-5" />
         </button>

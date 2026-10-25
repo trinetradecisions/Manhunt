@@ -33,6 +33,12 @@ body {
   background: #0F1923 !important;
 }
 
+/* Subtle Dark Tactical Map Treatment - High contrast, legible roads and landmarks */
+.leaflet-tile-pane {
+  filter: brightness(0.7) invert(1) contrast(1.7) hue-rotate(200deg) saturate(0.35) brightness(0.85);
+}
+
+
 /* High contrast touch targets for mobile */
 button, input, select {
   touch-action: manipulation;

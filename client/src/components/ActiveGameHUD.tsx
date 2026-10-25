@@ -244,9 +244,13 @@ export default function ActiveGameHUD({
     .padStart(2, '0')}`;
   const isLowTime = displaySeconds <= 120 && roomState.state === 'ACTIVE';
 
-  const uncaughtRunners = Object.values(roomState.members).filter(
-    (m) => m.team === 'RUNNERS' && !m.isCaught
+  const runnersList = Object.values(roomState.members).filter(
+    (m) => m.team === 'RUNNERS'
   );
+  const chasersList = Object.values(roomState.members).filter(
+    (m) => m.team === 'CHASERS'
+  );
+  const uncaughtRunners = runnersList.filter((m) => !m.isCaught);
 
   // Sync local catch code from member snapshot
   useEffect(() => {
@@ -336,24 +340,38 @@ export default function ActiveGameHUD({
   return (
     <>
       {/* Top Floating Command HUD */}
-      <div className="absolute top-[max(0.75rem,env(safe-area-inset-top))] left-3 right-3 z-[450] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-        {/* Left: Match Clock & Dynamic Zone Pill */}
-        <div className="flex items-center gap-2 flex-wrap pointer-events-auto">
-          {/* Match Clock & Tactical Status */}
-          <div className="bg-[#1F2731] border border-[#3B4652] px-3 py-1.5 rounded-2xl shadow-xl flex items-center gap-2.5 shrink-0">
+      <div className="absolute top-[max(0.75rem,env(safe-area-inset-top))] left-3 right-3 z-[450] flex items-center justify-between gap-2 pointer-events-none">
+        {/* Top-Left: Match Clock, Phase & Dynamic Zone */}
+        <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+          {/* Match Clock & Tactical Status Card */}
+          <div className="bg-[#1F2731]/95 backdrop-blur-md border border-[#3B4652] px-3.5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-3 shrink-0">
             <div className="flex flex-col">
-              <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-[#A8B0BA] flex items-center gap-1">
-                <Clock className="w-2.5 h-2.5" />
-                <span>
+              <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#A8B0BA] flex items-center gap-1.5">
+                <Clock className="w-3 h-3 text-[#39BDE8]" />
+                <span
+                  className={
+                    roomState.state === 'RUNNER_HEADSTART'
+                      ? 'text-[#39BDE8] font-black'
+                      : roomState.state === 'SAFETY_PAUSED'
+                      ? 'text-amber-400 font-black'
+                      : roomState.state === 'COMPLETED'
+                      ? 'text-[#4CC38A] font-black'
+                      : isLowTime
+                      ? 'text-[#FF4655] font-black'
+                      : 'text-[#ECE8E1]'
+                  }
+                >
                   {roomState.state === 'RUNNER_HEADSTART'
-                    ? 'Head Start'
+                    ? 'HEAD START'
                     : roomState.state === 'SAFETY_PAUSED'
-                    ? 'Paused'
-                    : 'Clock'}
+                    ? 'SAFETY PAUSED'
+                    : roomState.state === 'COMPLETED'
+                    ? 'MATCH ENDED'
+                    : 'HUNT ACTIVE'}
                 </span>
               </span>
               <span
-                className={`text-lg sm:text-xl font-black font-mono tracking-wider tabular-nums ${
+                className={`text-2xl sm:text-3xl font-black font-mono tracking-wider tabular-nums ${
                   isLowTime ? 'text-[#FF4655] animate-pulse' : 'text-white'
                 }`}
               >
@@ -362,13 +380,13 @@ export default function ActiveGameHUD({
             </div>
 
             <div
-              className={`w-2.5 h-2.5 rounded-full ${
+              className={`w-3 h-3 rounded-full shrink-0 ${
                 roomState.state === 'ACTIVE'
                   ? isLowTime
                     ? 'bg-[#FF4655] animate-ping'
                     : 'bg-[#4CC38A] animate-ping'
                   : roomState.state === 'RUNNER_HEADSTART'
-                  ? 'bg-[#39BDE8]'
+                  ? 'bg-[#39BDE8] animate-pulse'
                   : 'bg-[#FF4655]'
               }`}
             />
@@ -377,18 +395,18 @@ export default function ActiveGameHUD({
           {/* Dynamic Zone Indicator Pill */}
           {dynamicZone?.enabled && (
             <div
-              className={`px-2.5 sm:px-3 py-1.5 rounded-2xl border text-[10px] sm:text-[11px] font-mono font-bold flex items-center gap-1.5 shadow-md shrink-0 ${
+              className={`px-3 py-2 rounded-2xl border text-[11px] font-mono font-bold flex items-center gap-2 shadow-xl backdrop-blur-md shrink-0 ${
                 dynamicZoneState?.isWarningActive
-                  ? 'bg-[#FF4655]/20 border-[#FF4655] text-[#FF4655] animate-pulse'
-                  : 'bg-[#1F2731] border-[#39BDE8]/60 text-[#39BDE8]'
+                  ? 'bg-[#FF4655]/25 border-[#FF4655] text-[#FF4655] animate-pulse'
+                  : 'bg-[#1F2731]/95 border-[#39BDE8]/60 text-[#39BDE8]'
               }`}
             >
-              <Compass className={`w-3.5 h-3.5 ${dynamicZoneState?.isWarningActive ? 'animate-spin' : ''}`} />
-              <span>
+              <Compass className={`w-4 h-4 shrink-0 ${dynamicZoneState?.isWarningActive ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">
                 {dynamicZoneState?.isWarningActive
-                  ? `SHRINK WARNING: ${currentRadiusMeters}m → ${dynamicZoneState.nextRadiusMeters}m`
+                  ? `ZONE SHRINK: ${currentRadiusMeters}m → ${dynamicZoneState.nextRadiusMeters}m`
                   : dynamicZoneState?.isFinalZone
-                  ? `ZONE MIN: ${currentRadiusMeters}m`
+                  ? `ZONE: ${currentRadiusMeters}m (MIN)`
                   : dynamicZoneState?.nextShrinkAt
                   ? `ZONE: ${currentRadiusMeters}m (${Math.max(
                       0,
@@ -396,65 +414,47 @@ export default function ActiveGameHUD({
                     )}s)`
                   : `ZONE: ${currentRadiusMeters}m`}
               </span>
+              <span className="sm:hidden">
+                {dynamicZoneState?.isWarningActive
+                  ? `SHRINK: ${dynamicZoneState.nextRadiusMeters}m`
+                  : `${currentRadiusMeters}m`}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Middle: Live Team & Solo Score Ticker */}
-        {roomState.match?.scoreLedger && (
+        {/* Top-Right: Team Status, GPS & Controls */}
+        <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto flex-wrap justify-end shrink-0">
+          {/* Team Counts & Score Ledger Trigger */}
           <button
             type="button"
             onClick={() => setShowScoreEventsModal(true)}
             title="Click to view verified score ledger & recent events"
-            className="bg-[#1F2731] hover:bg-[#293440] border border-[#3B4652] hover:border-[#FFB800] px-3 py-1.5 rounded-2xl shadow-xl flex items-center gap-3 font-mono text-[10px] sm:text-xs pointer-events-auto shrink-0 transition-all active:scale-95 cursor-pointer"
+            className="bg-[#1F2731]/95 backdrop-blur-md hover:bg-[#293440] border border-[#3B4652] hover:border-[#FFB800] px-3 py-2 rounded-2xl shadow-xl flex items-center gap-2.5 font-mono text-xs pointer-events-auto shrink-0 transition-all active:scale-95 cursor-pointer"
           >
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#39BDE8]" />
-              <span className="text-[#A8B0BA] font-bold">RUNNERS:</span>
-              <strong className="text-[#39BDE8] font-black">{roomState.match.scoreLedger.teamScores?.RUNNERS ?? 0}</strong>
+              <span className="text-[#A8B0BA] font-bold hidden sm:inline">RUNNERS:</span>
+              <span className="text-[#A8B0BA] font-bold sm:hidden">R:</span>
+              <strong className="text-[#39BDE8] font-black">{uncaughtRunners.length}/{runnersList.length}</strong>
             </div>
             <div className="h-3 w-px bg-[#3B4652]" />
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#FF4655]" />
-              <span className="text-[#A8B0BA] font-bold">CHASERS:</span>
-              <strong className="text-[#FF4655] font-black">{roomState.match.scoreLedger.teamScores?.CHASERS ?? 0}</strong>
+              <span className="text-[#A8B0BA] font-bold hidden sm:inline">CHASERS:</span>
+              <span className="text-[#A8B0BA] font-bold sm:hidden">C:</span>
+              <strong className="text-[#FF4655] font-black">{chasersList.length}</strong>
             </div>
-            <div className="h-3 w-px bg-[#3B4652]" />
-            <div className="flex items-center gap-1.5">
-              <span className="text-[#A8B0BA] font-bold">SOLO:</span>
-              <strong className="text-[#FFB800] font-black">{roomState.match.scoreLedger.individualScores?.[myPlayerId] ?? roomState.match.scoreLedger.playerScores?.[myPlayerId] ?? 0}</strong>
-            </div>
-            <span className="text-[9px] text-[#A8B0BA] bg-[#161E27] px-1.5 py-0.5 rounded border border-[#3B4652]">
-              Events
-            </span>
-          </button>
-        )}
-
-        {/* Right: Tactical Controls & Health */}
-        <div className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto flex-wrap shrink-0">
-          {/* Tactical Chat Button */}
-          {onOpenChat && (
-            <button
-              onClick={onOpenChat}
-              className="relative p-2 sm:p-2.5 rounded-xl bg-[#1F2731] hover:bg-[#293440] border border-[#3B4652] text-[#ECE8E1] hover:text-white transition-all shadow-md active:scale-95 shrink-0"
-              title="Open Tactical Comms"
-            >
-              <MessageSquare className="w-4 h-4 text-[#FF4655]" />
-              {unreadChatCount > 0 && (
-                <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-[#FF4655] text-white font-mono font-black text-[9px] animate-pulse">
-                  {unreadChatCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {/* Player Dossier Button */}
-          <button
-            onClick={() => setShowDossier(true)}
-            className="p-2 sm:p-2.5 rounded-xl bg-[#1F2731] hover:bg-[#293440] border border-[#3B4652] text-[#A8B0BA] hover:text-[#4CC38A] transition-all shadow-md active:scale-95 shrink-0"
-            title="View Player Profile & Tactical Dossier"
-          >
-            <User className="w-4 h-4" />
+            {roomState.match?.scoreLedger && (
+              <>
+                <div className="h-3 w-px bg-[#3B4652]" />
+                <div className="flex items-center gap-1">
+                  <span className="text-[#FFB800] font-black">
+                    {roomState.match.scoreLedger.individualScores?.[myPlayerId] ?? roomState.match.scoreLedger.playerScores?.[myPlayerId] ?? 0}pts
+                  </span>
+                </div>
+              </>
+            )}
           </button>
 
           {/* Compact GPS Status Indicator Pill & Diagnostics */}
@@ -469,6 +469,31 @@ export default function ActiveGameHUD({
             onRequestLocationAccess={onRequestLocationAccess || (() => {})}
           />
 
+          {/* Tactical Chat Button */}
+          {onOpenChat && (
+            <button
+              onClick={onOpenChat}
+              className="relative p-2.5 rounded-xl bg-[#1F2731]/95 backdrop-blur-md hover:bg-[#293440] border border-[#3B4652] text-[#ECE8E1] hover:text-white transition-all shadow-md active:scale-95 shrink-0"
+              title="Open Tactical Comms"
+            >
+              <MessageSquare className="w-4 h-4 text-[#FF4655]" />
+              {unreadChatCount > 0 && (
+                <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-[#FF4655] text-white font-mono font-black text-[9px] animate-pulse">
+                  {unreadChatCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Player Dossier Button */}
+          <button
+            onClick={() => setShowDossier(true)}
+            className="p-2.5 rounded-xl bg-[#1F2731]/95 backdrop-blur-md hover:bg-[#293440] border border-[#3B4652] text-[#A8B0BA] hover:text-[#4CC38A] transition-all shadow-md active:scale-95 shrink-0"
+            title="View Player Profile & Tactical Dossier"
+          >
+            <User className="w-4 h-4" />
+          </button>
+
           {/* Safety Pause / Resume (Host or Referee) */}
           {isHostOrReferee && (
             <button
@@ -477,7 +502,7 @@ export default function ActiveGameHUD({
                   ? onResumeMatch
                   : onSafetyPause
               }
-              className={`px-2.5 sm:px-3 py-1.5 rounded-xl font-bold text-xs uppercase shadow-lg active:scale-95 transition-all border flex items-center gap-1 shrink-0 ${
+              className={`px-3 py-2 rounded-xl font-bold text-xs uppercase shadow-lg active:scale-95 transition-all border flex items-center gap-1.5 shrink-0 ${
                 roomState.state === 'SAFETY_PAUSED'
                   ? 'bg-[#4CC38A] text-[#0F1923] border-[#4CC38A]'
                   : 'bg-[#FF4655] text-white border-[#FF4655]'
@@ -486,12 +511,12 @@ export default function ActiveGameHUD({
               {roomState.state === 'SAFETY_PAUSED' ? (
                 <>
                   <Play className="w-3.5 h-3.5 fill-current" />
-                  <span>Resume</span>
+                  <span className="hidden sm:inline">Resume</span>
                 </>
               ) : (
                 <>
                   <AlertOctagon className="w-3.5 h-3.5" />
-                  <span>Pause</span>
+                  <span className="hidden sm:inline">Pause</span>
                 </>
               )}
             </button>
@@ -501,7 +526,7 @@ export default function ActiveGameHUD({
           {onLeaveRoom && (
             <button
               onClick={() => setShowLeaveModal(true)}
-              className="p-2 sm:p-2.5 rounded-xl bg-[#1F2731] hover:bg-[#293440] border border-[#3B4652] text-[#A8B0BA] hover:text-[#FF4655] transition-all shadow-md active:scale-95 shrink-0"
+              className="p-2.5 rounded-xl bg-[#1F2731]/95 backdrop-blur-md hover:bg-[#293440] border border-[#3B4652] text-[#A8B0BA] hover:text-[#FF4655] transition-all shadow-md active:scale-95 shrink-0"
               title="Exit Match & Leave Room"
             >
               <LogOut className="w-4 h-4" />
@@ -510,8 +535,8 @@ export default function ActiveGameHUD({
         </div>
       </div>
 
-      {/* Floating Tactical Alert & Status Stack */}
-      <div className="absolute top-20 sm:top-16 left-3 right-3 z-[450] pointer-events-none flex flex-col items-center gap-2">
+      {/* Contextual Tactical Alerts (Only Critical Warnings Over Map) */}
+      <div className="absolute top-20 sm:top-16 left-3 right-3 z-[440] pointer-events-none flex flex-col items-center gap-2">
         {/* Out of Safe Zone Warning Banner */}
         {outOfZoneDistanceMeters > 0 && roomState.state === 'ACTIVE' && (
           <div className="bg-[#FF4655] border-2 border-white/60 px-4 py-2 rounded-2xl shadow-tactical-glow flex items-center gap-2.5 pointer-events-auto text-white text-xs font-mono font-bold animate-pulse max-w-md w-full justify-center">
@@ -522,25 +547,17 @@ export default function ActiveGameHUD({
           </div>
         )}
 
-        {/* Chaser 120s Satellite Intel Bar */}
-        {isChaser && roomState.state === 'ACTIVE' && (
-          <div className="bg-[#1F2731] border border-[#FF4655]/60 px-3.5 py-1.5 rounded-2xl shadow-lg flex items-center gap-2 pointer-events-auto text-[11px] font-mono">
-            <Radio className="w-3.5 h-3.5 text-[#FF4655] shrink-0 animate-pulse" />
-            <span className="text-[#ECE8E1]">
-              NEXT SATELLITE SWEEP:{' '}
-              <strong className="text-[#FF4655]">
-                {scheduledSnapshot?.nextExpectedSnapshotAt
-                  ? `${Math.max(0, Math.ceil((scheduledSnapshot.nextExpectedSnapshotAt - Date.now()) / 1000))}s`
-                  : '120s'}
-              </strong>
-            </span>
-            <span className="text-[10px] text-[#A8B0BA] border-l border-[#3B4652] pl-2">
-              {scheduledSnapshot?.runners.length || 0} runner(s) pinged
-            </span>
+        {/* Runner Caught Notification Banner */}
+        {isRunner && myMember?.isCaught && (
+          <div className="bg-[#FF4655] text-white font-bold text-xs px-4 py-2.5 rounded-2xl shadow-xl pointer-events-auto flex items-center gap-2 max-w-md w-full justify-center">
+            <Eye className="w-4 h-4 shrink-0" />
+            <span>YOU WERE CAUGHT! Spectating remainder of match...</span>
           </div>
         )}
+      </div>
 
-        {/* Authoritative Shared Match Mission Dashboard for All Players */}
+      {/* Right Side Collapsible Mission Dashboard Drawer */}
+      <div className="absolute top-20 sm:top-16 right-3 z-[450] max-w-[calc(100vw-1.5rem)] sm:max-w-xs md:max-w-sm w-full pointer-events-auto flex flex-col items-end gap-2">
         {roomState.match?.sharedMissions && roomState.match.sharedMissions.length > 0 ? (
           <MissionProgressDashboard
             sharedMissions={roomState.match.sharedMissions}
@@ -597,60 +614,6 @@ export default function ActiveGameHUD({
             </div>
           )
         )}
-
-        {/* Runner Secret PIN Floating Bar */}
-        {isRunner && !myMember?.isCaught && (
-          <div className="bg-[#1F2731] border border-[#39BDE8]/70 px-4 py-2 rounded-2xl shadow-runner-glow flex items-center justify-between gap-3 pointer-events-auto max-w-md w-full">
-            <div className="flex items-center gap-3">
-              <div className="flex flex-col">
-                <span className="text-[9px] text-[#A8B0BA] font-mono uppercase tracking-wider">
-                  Secret PIN:
-                </span>
-                <span className="font-mono text-xl font-black text-[#39BDE8] tracking-widest leading-none">
-                  {localCatchCode || myMember?.catchCode || '----'}
-                </span>
-              </div>
-              {codeSecondsRemaining > 0 && (
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-lg border ${codeSecondsRemaining <= 5 ? 'text-[#FF4655] border-[#FF4655] animate-pulse' : 'text-[#39BDE8] border-[#39BDE8]/40'}`}>
-                  {codeSecondsRemaining}s
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleCopyCode}
-                title="Copy Catch PIN"
-                className="p-2 rounded-xl bg-[#293440] hover:bg-[#3B4652] border border-[#3B4652] text-[#ECE8E1] transition-colors"
-              >
-                {copiedCode ? (
-                  <Check className="w-3.5 h-3.5 text-[#39BDE8]" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </button>
-              <button
-                onClick={() => {
-                  setShowRunnerCodeModal(true);
-                  if (!localCatchCode && !myMember?.catchCode) {
-                    handleRequestNewCode();
-                  }
-                }}
-                className="px-3 py-1.5 rounded-xl bg-[#39BDE8] hover:brightness-110 active:scale-95 text-[#0F1923] font-mono font-bold text-xs uppercase"
-              >
-                Catch Screen
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Runner Caught Banner */}
-        {isRunner && myMember?.isCaught && (
-          <div className="bg-[#FF4655] text-white font-bold text-xs px-4 py-2.5 rounded-2xl shadow-xl pointer-events-auto flex items-center gap-2">
-            <Eye className="w-4 h-4" />
-            <span>YOU WERE CAUGHT! Spectating remainder of match...</span>
-          </div>
-        )}
       </div>
 
       {/* Emergency Safety Pause Modal Overlay */}
@@ -679,17 +642,80 @@ export default function ActiveGameHUD({
         </div>
       )}
 
-      {/* Bottom Controls Deck */}
-      <div className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-3 right-3 z-[450] flex flex-col gap-2 pointer-events-none max-w-md mx-auto">
-        {/* Chaser "Tag Runner" Floating Action Button */}
+      {/* Bottom Tactical Controls Deck */}
+      <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-[450] flex flex-col gap-2 pointer-events-none max-w-md mx-auto">
+        {/* Runner Secret PIN Floating Bar (Docked at bottom above voice controls) */}
+        {isRunner && !myMember?.isCaught && (
+          <div className="bg-[#1F2731]/95 backdrop-blur-md border border-[#39BDE8]/70 px-4 py-2 rounded-2xl shadow-runner-glow flex items-center justify-between gap-3 pointer-events-auto w-full">
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-[#A8B0BA] font-mono uppercase font-bold tracking-wider">
+                  Secret PIN:
+                </span>
+                <span className="font-mono text-2xl font-black text-[#39BDE8] tracking-widest leading-none">
+                  {localCatchCode || myMember?.catchCode || '----'}
+                </span>
+              </div>
+              {codeSecondsRemaining > 0 && (
+                <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg border ${codeSecondsRemaining <= 5 ? 'text-[#FF4655] border-[#FF4655] animate-pulse' : 'text-[#39BDE8] border-[#39BDE8]/40'}`}>
+                  {codeSecondsRemaining}s
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyCode}
+                title="Copy Catch PIN"
+                className="p-2.5 rounded-xl bg-[#293440] hover:bg-[#3B4652] border border-[#3B4652] text-[#ECE8E1] transition-colors active:scale-95"
+              >
+                {copiedCode ? (
+                  <Check className="w-4 h-4 text-[#39BDE8]" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowRunnerCodeModal(true);
+                  if (!localCatchCode && !myMember?.catchCode) {
+                    handleRequestNewCode();
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-[#39BDE8] hover:brightness-110 active:scale-95 text-[#0F1923] font-mono font-black text-xs uppercase shadow-md"
+              >
+                Catch Screen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Chaser Intel Bar & Tag Runner Action Button */}
         {isChaser && roomState.state === 'ACTIVE' && (
-          <div className="pointer-events-auto flex justify-center">
+          <div className="pointer-events-auto flex flex-col gap-1.5 w-full">
+            {/* Chaser Satellite Sweep Ticker */}
+            <div className="bg-[#1F2731]/95 backdrop-blur-md border border-[#FF4655]/50 px-3.5 py-1.5 rounded-xl flex items-center justify-between text-xs font-mono shadow-md">
+              <div className="flex items-center gap-2 text-[#ECE8E1]">
+                <Radio className="w-3.5 h-3.5 text-[#FF4655] shrink-0 animate-pulse" />
+                <span>Next Satellite Sweep:</span>
+                <strong className="text-[#FF4655] font-black">
+                  {scheduledSnapshot?.nextExpectedSnapshotAt
+                    ? `${Math.max(0, Math.ceil((scheduledSnapshot.nextExpectedSnapshotAt - Date.now()) / 1000))}s`
+                    : '120s'}
+                </strong>
+              </div>
+              <span className="text-[10px] text-[#A8B0BA] border-l border-[#3B4652] pl-2 font-bold">
+                {scheduledSnapshot?.runners.length || 0} pinged
+              </span>
+            </div>
+
+            {/* Tag Runner Button */}
             <button
               onClick={() => {
                 setShowTagModal(true);
                 setTagError(null);
               }}
-              className="w-full min-h-[48px] bg-[#FF4655] hover:brightness-110 active:scale-98 text-white font-black px-6 py-3.5 rounded-2xl shadow-tactical-glow text-sm flex items-center justify-center gap-2 transition-all uppercase tracking-wider"
+              className="w-full min-h-[50px] bg-[#FF4655] hover:brightness-110 active:scale-98 text-white font-black px-6 py-3.5 rounded-2xl shadow-tactical-glow text-sm flex items-center justify-center gap-2 transition-all uppercase tracking-wider"
             >
               <Zap className="w-4 h-4 fill-current" />
               <span>Tag Nearby Runner ({uncaughtRunners.length} left)</span>
