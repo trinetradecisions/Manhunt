@@ -11,14 +11,16 @@ export async function POST(
   try {
     const { code } = await params;
     const body = await req.json().catch(() => ({}));
-    const playerId = body.playerId || 'player_' + Math.random().toString(36).substring(2, 9);
-    const nickname = body.nickname || 'Operative';
+    const playerId = body.playerId || body.player?.id || 'player_' + Math.random().toString(36).substring(2, 9);
+    const nickname = body.nickname || body.player?.nickname || 'Operative';
+    const role = body.role || body.player?.role;
+    const team = body.team || body.player?.team;
 
     const res = await GameStateStore.joinRoom(code, {
       id: playerId,
       nickname,
-      role: body.role,
-      team: body.team,
+      role,
+      team,
     });
 
     if (!res.success) {
