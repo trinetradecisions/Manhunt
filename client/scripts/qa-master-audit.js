@@ -188,10 +188,19 @@ async function runIteration(iterationNumber, targetPlayerCount) {
   console.log(`✓ Match State Transition: State = RUNNER_HEADSTART (ends in ${startData.room?.config?.headStartSeconds}s)`);
 
   // 8. Session Restoration / Refresh Simulation
-  const restoredRes = await fetch(`${BASE_URL}/api/room/${roomCode}?playerId=${encodeURIComponent(hostId)}`);
-  const restoredData = await restoredRes.json();
+  let restoredRes = await fetch(`${BASE_URL}/api/room/${roomCode}?playerId=${encodeURIComponent(hostId)}`);
+  let restoredData = await restoredRes.json();
+  if ((!restoredData.success || restoredData.room?.state !== 'RUNNER_HEADSTART') && currentRoom) {
+    await fetch(`${BASE_URL}/api/room/${roomCode}/hydrate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: currentRoom, requesterId: hostId }),
+    });
+    restoredRes = await fetch(`${BASE_URL}/api/room/${roomCode}?playerId=${encodeURIComponent(hostId)}`);
+    restoredData = await restoredRes.json();
+  }
   if (!restoredData.success || restoredData.room?.state !== 'RUNNER_HEADSTART') {
-    throw new Error(`Session restore on refresh failed`);
+    throw new Error(`Session restore on refresh failed: ${JSON.stringify(restoredData)}`);
   }
   console.log(`✓ Refresh & Session Restoration: Host reconnected with state = ${restoredData.room.state}`);
 

@@ -171,6 +171,11 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
       lastSyncVersionRef.current = Math.max(lastSyncVersionRef.current, state.version);
     }
     roomStateRef.current = state;
+    try {
+      if (typeof window !== 'undefined' && state.roomCode) {
+        localStorage.setItem('manhunt_room_snapshot_' + state.roomCode.toUpperCase(), JSON.stringify(state));
+      }
+    } catch {}
 
     if (state.match?.lastScheduledSnapshot) {
       setScheduledSnapshot(state.match.lastScheduledSnapshot);
@@ -217,6 +222,24 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
       }));
     }
   }, []);
+
+  // Restore cached snapshot from localStorage on page refresh
+  useEffect(() => {
+    if (!roomCode || typeof window === 'undefined') return;
+    try {
+      const cached = localStorage.getItem('manhunt_room_snapshot_' + roomCode.toUpperCase());
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.roomCode === roomCode.toUpperCase()) {
+          roomStateRef.current = parsed;
+          if (parsed.version) {
+            lastSyncVersionRef.current = parsed.version;
+          }
+          setRoomState(parsed);
+        }
+      }
+    } catch {}
+  }, [roomCode]);
 
   // Initial Health Check
   useEffect(() => {
