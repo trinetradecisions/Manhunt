@@ -1,5 +1,6 @@
 import {
   ActiveMission,
+  SharedMission,
   GameConfig,
   MapPoint,
   MissionCheckpoint,
@@ -17,13 +18,13 @@ import {
 } from './geo';
 import { ScoringService } from './scoring';
 
-function randomId(): string {
-  return 'm_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+function randomId(prefix = 'm'): string {
+  return `${prefix}_` + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
 }
 
 export class MissionService {
   private scoringService: ScoringService;
-  private lastCompletedTemplates: Map<string, MissionTemplateType> = new Map();
+  // Track consecutive GPS observation times per mission to calculate stay time accurately
   private lastStayVerificationTime: Map<string, number> = new Map();
 
   constructor(scoringService: ScoringService) {
@@ -37,6 +38,7 @@ export class MissionService {
         'SECURE_POINT',
         'CHECKPOINT_RUN',
         'SURVIVAL_MILESTONE',
+        'CLOSE_ENCOUNTER',
         'LANDMARK_RECON',
       ],
       difficultyWeights: {
@@ -76,90 +78,30 @@ export class MissionService {
     };
   }
 
-  public initializeMatchMissions(room: RoomState): void {
-    if (!room.match) return;
-    room.match.activeMissions = room.match.activeMissions || {};
-    room.match.completedMissions = room.match.completedMissions || [];
-
-    const runners = Object.values(room.members).filter(
-      (m) => m.team === 'RUNNERS' && !m.isCaught && !m.isEliminated
-    );
-
-    for (const runner of runners) {
-      if (!room.match.activeMissions[runner.id]) {
-        const mission = this.generateRandomMission(room, runner);
-        if (mission) {
-          room.match.activeMissions[runner.id] = mission;
-        }
-      }
+  /**
+   * Initializes authoritative shared missions for the entire match.
+   * All enabled mission types become shared match objectives visible to all players.
+   */
+  public initializeSharedMissions(room: RoomState): SharedMission[] {
+    if (!room.match) return [];
+    const defaultConfig = this.getDefaultConfig();
+    const config = { ...defaultConfig, ...(room.config.missions || {}) };
+    if (config.enabled === false) {
+      room.match.sharedMissions = [];
+      return [];
     }
-  }
 
-  private selectMissionType(
-    config: MissionsConfig,
-    lastType?: MissionTemplateType
-  ): MissionTemplateType {
     const rawEnabled = config.enabledTypes || config.enabledMissionTypes || [
       'SECURE_POINT',
       'CHECKPOINT_RUN',
       'SURVIVAL_MILESTONE',
+      'CLOSE_ENCOUNTER',
       'LANDMARK_RECON',
     ];
-    const enabled = rawEnabled as MissionTemplateType[];
-    const pool = enabled.length > 1 && lastType ? enabled.filter((t) => t !== lastType) : enabled;
-    const weights = config.difficultyWeights || { easy: 45, medium: 35, hard: 20 };
-
-    const getWeight = (type: MissionTemplateType): number => {
-      switch (type) {
-        case 'SURVIVAL_MILESTONE':
-        case 'SECURE_POINT':
-        case 'SECURE_THE_POINT':
-          return weights.easy;
-        case 'CHECKPOINT_RUN':
-        case 'LANDMARK_RECON':
-          return weights.medium;
-        case 'CLOSE_ENCOUNTER':
-          return weights.hard;
-        default:
-          return 25;
-      }
-    };
-
-    let totalWeight = 0;
-    for (const type of pool) {
-      totalWeight += getWeight(type);
-    }
-
-    let randomVal = Math.random() * (totalWeight || 1);
-    for (const type of pool) {
-      const w = getWeight(type);
-      if (randomVal <= w) {
-        return type;
-      }
-      randomVal -= w;
-    }
-
-    return pool[0] || 'SECURE_POINT';
-  }
-
-  public generateRandomMission(
-    room: RoomState,
-    runner: PlayerMember
-  ): ActiveMission | null {
-    if (room.state !== 'ACTIVE' && room.state !== 'RUNNER_HEADSTART') {
-      return null;
-    }
-
-    const config = room.config.missions || this.getDefaultConfig();
-    if (!config.enabled) return null;
-
-    const lastType = this.lastCompletedTemplates.get(runner.id);
-    const rawType = this.selectMissionType(config, lastType);
-    const templateType: MissionTemplateType =
-      rawType === 'SECURE_THE_POINT' ? 'SECURE_POINT' : rawType;
+    const enabledTypes = rawEnabled as MissionTemplateType[];
 
     const activeZone =
-      room.config.dynamicZone?.enabled && room.match?.dynamicZoneState
+      room.config.dynamicZone?.enabled && room.match.dynamicZoneState
         ? {
             ...room.config.playZone,
             radiusMeters: room.match.dynamicZoneState.currentRadiusMeters,
@@ -167,291 +109,242 @@ export class MissionService {
         : room.config.playZone;
 
     const now = Date.now();
-    const matchId = room.match?.startedAt?.toString() || now.toString();
-    const missionId = randomId();
+    const matchId = room.match.startedAt.toString();
+    const sharedMissions: SharedMission[] = [];
 
-    const existingLocations = Object.values(room.match?.activeMissions || {})
-      .map((m) => m.targetLocation)
-      .filter((loc): loc is MapPoint => !!loc);
+    for (const rawType of enabledTypes) {
+      const type: MissionTemplateType =
+        rawType === 'SECURE_THE_POINT' ? 'SECURE_POINT' : rawType;
+      const missionId = randomId('shared_' + type.toLowerCase());
 
-    const pickSafeDistinctPoint = (): MapPoint => {
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const pt = generateRandomPointInZone(activeZone, 25);
-        const tooClose = existingLocations.some((ex) => {
-          const exLat = ex.latitude ?? ex.lat;
-          const exLng = ex.longitude ?? ex.lng;
-          return calculateHaversineDistance(pt.lat, pt.lng, exLat, exLng) < 40;
-        });
-        if (!tooClose || attempt === 9) {
-          return {
-            lat: pt.lat,
-            lng: pt.lng,
-            latitude: pt.lat,
-            longitude: pt.lng,
-          };
-        }
-      }
-      const fallback = generateRandomPointInZone(activeZone, 25);
-      return {
-        lat: fallback.lat,
-        lng: fallback.lng,
-        latitude: fallback.lat,
-        longitude: fallback.lng,
-      };
-    };
+      switch (type) {
+        case 'SECURE_POINT': {
+          const pt = generateRandomPointInZone(activeZone, 25);
+          const durationSec = config.securePointDurationSeconds || 90;
+          const radius = config.securePointRadiusMeters || 25;
+          const rewards = config.rewards?.securePoint || { individual: 100, team: 100 };
 
-    switch (templateType) {
-      case 'SECURE_POINT': {
-        const targetPt = pickSafeDistinctPoint();
-        const durationSec = config.securePointDurationSeconds || 90;
-        const radius = config.securePointRadiusMeters || 25;
-        const rewards = config.rewards?.securePoint || { individual: 100, team: 100 };
-
-        return {
-          id: missionId,
-          playerId: runner.id,
-          playerNickname: runner.nickname,
-          roomCode: room.roomCode,
-          matchId,
-          type: rawType,
-          templateType: 'SECURE_POINT',
-          title: 'Secure Sector Point',
-          description: `Advance to the designated point and hold the sector for ${durationSec} seconds.`,
-          difficulty: 'EASY',
-          rewardIndividual: rewards.individual,
-          rewardTeam: rewards.team,
-          assignedAt: now,
-          deadlineAt: null,
-          targetLocation: targetPt,
-          targetRadiusMeters: radius,
-          requiredStaySeconds: durationSec,
-          currentStaySeconds: 0,
-          stayDurationSeconds: 0,
-          stayResetOnDeparture: config.securePointLeaveBehavior !== 'PAUSE',
-          progress: 0,
-          status: 'ACTIVE',
-        };
-      }
-
-      case 'CHECKPOINT_RUN': {
-        const count = Math.max(2, Math.min(5, config.checkpointCount || 3));
-        const checkpoints: MissionCheckpoint[] = [];
-        for (let i = 0; i < count; i++) {
-          const pt = pickSafeDistinctPoint();
-          checkpoints.push({
-            id: `cp_${missionId}_${i + 1}`,
-            index: i + 1,
-            latitude: pt.lat,
-            longitude: pt.lng,
-            radiusMeters: 25,
-            completed: false,
-            isCompleted: false,
+          sharedMissions.push({
+            id: missionId,
+            playerId: 'shared',
+            playerNickname: 'Runners Team',
+            roomCode: room.roomCode,
+            matchId,
+            type: 'SECURE_POINT',
+            templateType: 'SECURE_POINT',
+            title: 'Sector Alpha Secure',
+            description: `Advance to the designated objective and hold the sector for ${durationSec}s.`,
+            difficulty: 'EASY',
+            rewardIndividual: rewards.individual,
+            rewardTeam: rewards.team,
+            assignedAt: now,
+            deadlineAt: null,
+            targetLocation: pt,
+            targetRadiusMeters: radius,
+            requiredStaySeconds: durationSec,
+            currentStaySeconds: 0,
+            stayDurationSeconds: 0,
+            stayResetOnDeparture: config.securePointLeaveBehavior !== 'PAUSE',
+            progress: 0,
+            status: 'ACTIVE',
           });
-        }
-        const deadlineSec = config.checkpointDeadlineSeconds || 480;
-        const rewards = config.rewards?.checkpointRun || { individual: 150, team: 150 };
-
-        return {
-          id: missionId,
-          playerId: runner.id,
-          playerNickname: runner.nickname,
-          roomCode: room.roomCode,
-          matchId,
-          type: 'CHECKPOINT_RUN',
-          templateType,
-          title: `Checkpoint Sweep (1/${count})`,
-          description: `Reach all ${count} checkpoints in strict order before the mission deadline.`,
-          difficulty: 'MEDIUM',
-          rewardIndividual: rewards.individual,
-          rewardTeam: rewards.team,
-          assignedAt: now,
-          deadlineAt: now + deadlineSec * 1000,
-          targetLocation: {
-            lat: checkpoints[0].latitude,
-            lng: checkpoints[0].longitude,
-            latitude: checkpoints[0].latitude,
-            longitude: checkpoints[0].longitude,
-          },
-          targetRadiusMeters: 25,
-          requiredStaySeconds: 0,
-          currentStaySeconds: 0,
-          stayDurationSeconds: 0,
-          checkpoints,
-          currentCheckpointIndex: 0,
-          progress: 0,
-          status: 'ACTIVE',
-        };
-      }
-
-      case 'SURVIVAL_MILESTONE': {
-        const milestoneSec = config.survivalMilestoneSeconds || 300;
-        const rewards = config.rewards?.survivalMilestone || { individual: 50, team: 50 };
-
-        return {
-          id: missionId,
-          playerId: runner.id,
-          playerNickname: runner.nickname,
-          roomCode: room.roomCode,
-          matchId,
-          type: 'SURVIVAL_MILESTONE',
-          templateType,
-          title: 'Survival Protocol',
-          description: `Evade chasers and survive for ${Math.round(milestoneSec / 60)} minutes without being tagged.`,
-          difficulty: 'EASY',
-          rewardIndividual: rewards.individual,
-          rewardTeam: rewards.team,
-          assignedAt: now,
-          deadlineAt: now + milestoneSec * 1000,
-          targetRadiusMeters: 0,
-          requiredStaySeconds: milestoneSec,
-          currentStaySeconds: 0,
-          stayDurationSeconds: 0,
-          milestoneMinutes: Math.round(milestoneSec / 60),
-          milestoneAwardedCount: 0,
-          progress: 0,
-          status: 'ACTIVE',
-        };
-      }
-
-      case 'CLOSE_ENCOUNTER': {
-        const dist = config.closeEncounterDistanceMeters || 50;
-        const durationSec = config.closeEncounterDurationSeconds || 60;
-        const rewards = config.rewards?.closeEncounter || { individual: 150, team: 150 };
-
-        return {
-          id: missionId,
-          playerId: runner.id,
-          playerNickname: runner.nickname,
-          roomCode: room.roomCode,
-          matchId,
-          type: 'CLOSE_ENCOUNTER',
-          templateType,
-          title: 'Ghost Operative: Close Encounter',
-          description: `Shadow an active chaser within ${dist}m for ${durationSec}s without being tagged!`,
-          difficulty: 'HARD',
-          rewardIndividual: rewards.individual,
-          rewardTeam: rewards.team,
-          assignedAt: now,
-          deadlineAt: null,
-          targetRadiusMeters: dist,
-          proximityDistanceMeters: dist,
-          requiredStaySeconds: durationSec,
-          currentStaySeconds: 0,
-          stayDurationSeconds: 0,
-          progress: 0,
-          status: 'ACTIVE',
-        };
-      }
-
-      case 'LANDMARK_RECON': {
-        const markers = activeZone.markers || [];
-        let landmarkPt: MapPoint;
-        let landmarkName = 'Strategic Waypoint';
-        let clueQuestion: string | undefined;
-        let clueAnswer: string | undefined;
-
-        if (markers.length > 0) {
-          const selected = markers[Math.floor(Math.random() * markers.length)];
-          landmarkPt = { lat: selected.lat, lng: selected.lng, latitude: selected.lat, longitude: selected.lng };
-          landmarkName = selected.label;
-        } else {
-          landmarkPt = pickSafeDistinctPoint();
-          landmarkName = 'Alpha Sector Outpost';
+          break;
         }
 
-        const code = Math.floor(1000 + Math.random() * 9000).toString();
-        clueQuestion = `Recon Intel: Enter security confirmation PIN [${code}]`;
-        clueAnswer = code;
+        case 'CHECKPOINT_RUN': {
+          const count = Math.max(2, Math.min(5, config.checkpointCount || 3));
+          const checkpoints: MissionCheckpoint[] = [];
+          for (let i = 0; i < count; i++) {
+            const pt = generateRandomPointInZone(activeZone, 25);
+            checkpoints.push({
+              id: `cp_${missionId}_${i + 1}`,
+              index: i + 1,
+              latitude: pt.lat,
+              longitude: pt.lng,
+              radiusMeters: 25,
+              completed: false,
+              isCompleted: false,
+            });
+          }
+          const deadlineSec = config.checkpointDeadlineSeconds || 480;
+          const rewards = config.rewards?.checkpointRun || { individual: 150, team: 150 };
 
-        const rewards = config.rewards?.landmarkRecon || { individual: 100, team: 100 };
+          sharedMissions.push({
+            id: missionId,
+            playerId: 'shared',
+            playerNickname: 'Runners Team',
+            roomCode: room.roomCode,
+            matchId,
+            type: 'CHECKPOINT_RUN',
+            templateType: 'CHECKPOINT_RUN',
+            title: `Checkpoint Sweep (1/${count})`,
+            description: `Reach all ${count} tactical checkpoints in numerical sequence.`,
+            difficulty: 'MEDIUM',
+            rewardIndividual: rewards.individual,
+            rewardTeam: rewards.team,
+            assignedAt: now,
+            deadlineAt: now + deadlineSec * 1000,
+            targetLocation: {
+              lat: checkpoints[0].latitude,
+              lng: checkpoints[0].longitude,
+              latitude: checkpoints[0].latitude,
+              longitude: checkpoints[0].longitude,
+            },
+            targetRadiusMeters: 25,
+            requiredStaySeconds: 0,
+            currentStaySeconds: 0,
+            stayDurationSeconds: 0,
+            checkpoints,
+            currentCheckpointIndex: 0,
+            progress: 0,
+            status: 'ACTIVE',
+          });
+          break;
+        }
 
-        return {
-          id: missionId,
-          playerId: runner.id,
-          playerNickname: runner.nickname,
-          roomCode: room.roomCode,
-          matchId,
-          type: 'LANDMARK_RECON',
-          templateType,
-          title: `Recon: ${landmarkName}`,
-          description: `Proceed to ${landmarkName} and verify intelligence payload.`,
-          difficulty: 'MEDIUM',
-          rewardIndividual: rewards.individual,
-          rewardTeam: rewards.team,
-          assignedAt: now,
-          deadlineAt: null,
-          targetLocation: landmarkPt,
-          targetRadiusMeters: config.landmarkRadiusMeters || 25,
-          requiredStaySeconds: 0,
-          currentStaySeconds: 0,
-          stayDurationSeconds: 0,
-          progress: 0,
-          landmarkClue: {
-            name: landmarkName,
-            question: clueQuestion,
-            answer: clueAnswer,
-            isAnswered: false,
-          },
-          status: 'ACTIVE',
-        };
+        case 'SURVIVAL_MILESTONE': {
+          const milestoneSec = config.survivalMilestoneSeconds || 300;
+          const rewards = config.rewards?.survivalMilestone || { individual: 50, team: 50 };
+
+          sharedMissions.push({
+            id: missionId,
+            playerId: 'shared',
+            playerNickname: 'Runners Team',
+            roomCode: room.roomCode,
+            matchId,
+            type: 'SURVIVAL_MILESTONE',
+            templateType: 'SURVIVAL_MILESTONE',
+            title: 'Tactical Survival Protocol',
+            description: `Evade chasers and survive for ${Math.round(milestoneSec / 60)} minutes without being tagged.`,
+            difficulty: 'EASY',
+            rewardIndividual: rewards.individual,
+            rewardTeam: rewards.team,
+            assignedAt: now,
+            deadlineAt: now + milestoneSec * 1000,
+            targetRadiusMeters: 0,
+            requiredStaySeconds: milestoneSec,
+            currentStaySeconds: 0,
+            stayDurationSeconds: 0,
+            milestoneMinutes: Math.round(milestoneSec / 60),
+            progress: 0,
+            status: 'ACTIVE',
+          });
+          break;
+        }
+
+        case 'CLOSE_ENCOUNTER': {
+          const dist = config.closeEncounterDistanceMeters || 50;
+          const durationSec = config.closeEncounterDurationSeconds || 60;
+          const rewards = config.rewards?.closeEncounter || { individual: 150, team: 150 };
+
+          sharedMissions.push({
+            id: missionId,
+            playerId: 'shared',
+            playerNickname: 'Runners Team',
+            roomCode: room.roomCode,
+            matchId,
+            type: 'CLOSE_ENCOUNTER',
+            templateType: 'CLOSE_ENCOUNTER',
+            title: 'Ghost Operative: Close Encounter',
+            description: `Shadow an active chaser within ${dist}m for ${durationSec}s without being tagged!`,
+            difficulty: 'HARD',
+            rewardIndividual: rewards.individual,
+            rewardTeam: rewards.team,
+            assignedAt: now,
+            deadlineAt: null,
+            targetRadiusMeters: dist,
+            proximityDistanceMeters: dist,
+            requiredStaySeconds: durationSec,
+            currentStaySeconds: 0,
+            stayDurationSeconds: 0,
+            progress: 0,
+            status: 'ACTIVE',
+          });
+          break;
+        }
+
+        case 'LANDMARK_RECON': {
+          const markers = activeZone.markers || activeZone.bases || [];
+          let landmarkPt: MapPoint;
+          let landmarkName = 'Strategic Waypoint';
+          if (markers.length > 0) {
+            const selected = markers[Math.floor(Math.random() * markers.length)];
+            landmarkPt = { lat: selected.lat, lng: selected.lng, latitude: selected.lat, longitude: selected.lng };
+            landmarkName = selected.label;
+          } else {
+            landmarkPt = generateRandomPointInZone(activeZone, 25);
+            landmarkName = 'Alpha Sector Outpost';
+          }
+
+          const code = Math.floor(1000 + Math.random() * 9000).toString();
+          const rewards = config.rewards?.landmarkRecon || { individual: 100, team: 100 };
+
+          sharedMissions.push({
+            id: missionId,
+            playerId: 'shared',
+            playerNickname: 'Runners Team',
+            roomCode: room.roomCode,
+            matchId,
+            type: 'LANDMARK_RECON',
+            templateType: 'LANDMARK_RECON',
+            title: `Recon: ${landmarkName}`,
+            description: `Proceed to ${landmarkName} and verify intelligence code.`,
+            difficulty: 'MEDIUM',
+            rewardIndividual: rewards.individual,
+            rewardTeam: rewards.team,
+            assignedAt: now,
+            deadlineAt: null,
+            targetLocation: landmarkPt,
+            targetRadiusMeters: config.landmarkRadiusMeters || 25,
+            requiredStaySeconds: 0,
+            currentStaySeconds: 0,
+            stayDurationSeconds: 0,
+            progress: 0,
+            landmarkClue: {
+              name: landmarkName,
+              question: `Recon Intel: Enter security confirmation PIN [${code}]`,
+              answer: code,
+              isAnswered: false,
+            },
+            status: 'ACTIVE',
+          });
+          break;
+        }
       }
-
-      default:
-        return null;
     }
+
+    room.match.sharedMissions = sharedMissions;
+    return sharedMissions;
   }
 
-  public evaluateMissionProgress(
+  /**
+   * Evaluates all active shared missions against the moving runner's coordinates.
+   * If any runner completes a shared mission, it is marked complete for the entire match.
+   */
+  public evaluateSharedMissions(
     room: RoomState,
-    playerId: string,
+    runner: PlayerMember,
     location?: PlayerLocation
-  ): { completedMissions: ActiveMission[]; updatedMission?: ActiveMission } {
-    if (!room.match || !room.match.activeMissions) {
-      return { completedMissions: [] };
+  ): { completedMissions: SharedMission[]; allCompleted: boolean } {
+    if (!room.match || !room.match.sharedMissions || room.match.sharedMissions.length === 0) {
+      return { completedMissions: [], allCompleted: false };
     }
-
-    const mission = room.match.activeMissions[playerId];
-    if (!mission || mission.status !== 'ACTIVE') {
-      return { completedMissions: [] };
-    }
-
-    const runner = room.members[playerId];
-    if (!runner || runner.team !== 'RUNNERS' || runner.isCaught || runner.isEliminated) {
-      mission.status = 'FAILED';
-      delete room.match.activeMissions[playerId];
-      return { completedMissions: [] };
+    if (runner.team !== 'RUNNERS' || runner.isCaught || runner.isEliminated) {
+      return { completedMissions: [], allCompleted: false };
     }
 
     const now = location?.timestamp || Date.now();
-    const config = room.config.missions || this.getDefaultConfig();
-    const completedList: ActiveMission[] = [];
+    const completedList: SharedMission[] = [];
 
-    const rawType = (mission.type || mission.templateType || '').toUpperCase();
-    const isSecurePoint = rawType === 'SECURE_POINT' || rawType === 'SECURE_THE_POINT';
-    const isCheckpointRun = rawType === 'CHECKPOINT_RUN';
-    const isSurvivalMilestone = rawType === 'SURVIVAL_MILESTONE';
-    const isCloseEncounter = rawType === 'CLOSE_ENCOUNTER';
-    const isLandmarkRecon = rawType === 'LANDMARK_RECON';
+    for (const mission of room.match.sharedMissions) {
+      if (mission.status !== 'ACTIVE') continue;
 
-    if (mission.deadlineAt && now > mission.deadlineAt) {
-      if (isSurvivalMilestone) {
-        this.completeMission(room, mission);
-        completedList.push(mission);
-        return { completedMissions: completedList };
-      } else {
-        mission.status = 'FAILED';
-        delete room.match.activeMissions[playerId];
-        const next = this.generateRandomMission(room, runner);
-        if (next) room.match.activeMissions[playerId] = next;
-        return { completedMissions: [], updatedMission: next || undefined };
-      }
-    }
+      const rawType = (mission.type || mission.templateType || '').toUpperCase();
 
-    if (isSecurePoint) {
-      if (location && mission.targetLocation) {
+      // 1. SECURE_POINT
+      if (rawType === 'SECURE_POINT' && location && mission.targetLocation) {
         const targetLat = mission.targetLocation.latitude ?? mission.targetLocation.lat;
         const targetLng = mission.targetLocation.longitude ?? mission.targetLocation.lng;
-
         const dist = calculateHaversineDistance(
           location.latitude,
           location.longitude,
@@ -466,30 +359,32 @@ export class MissionService {
 
         if (effectiveDist <= radius) {
           mission.isInRadius = true;
-          const lastVerif = this.lastStayVerificationTime.get(mission.id);
+          const key = `${mission.id}_${runner.id}`;
+          const lastVerif = this.lastStayVerificationTime.get(key);
           const deltaSec = lastVerif ? Math.max(0, Math.round((now - lastVerif) / 1000)) : 0;
-          this.lastStayVerificationTime.set(mission.id, now);
+          this.lastStayVerificationTime.set(key, now);
 
           mission.currentStaySeconds = (mission.currentStaySeconds || 0) + deltaSec;
           mission.stayDurationSeconds = mission.currentStaySeconds;
           mission.progress = Math.min(100, Math.round((mission.currentStaySeconds / reqStay) * 100));
 
           if (mission.currentStaySeconds >= reqStay) {
-            this.completeMission(room, mission);
+            this.completeSharedMission(room, mission, runner);
             completedList.push(mission);
           }
         } else {
           mission.isInRadius = false;
-          if (mission.stayResetOnDeparture || config.securePointLeaveBehavior === 'RESET') {
+          if (mission.stayResetOnDeparture) {
             mission.currentStaySeconds = 0;
             mission.stayDurationSeconds = 0;
             mission.progress = 0;
           }
-          this.lastStayVerificationTime.delete(mission.id);
+          this.lastStayVerificationTime.delete(`${mission.id}_${runner.id}`);
         }
       }
-    } else if (isCheckpointRun) {
-      if (location && mission.checkpoints && mission.currentCheckpointIndex !== undefined) {
+
+      // 2. CHECKPOINT_RUN
+      else if (rawType === 'CHECKPOINT_RUN' && location && mission.checkpoints && mission.currentCheckpointIndex !== undefined) {
         const currentCp = mission.checkpoints[mission.currentCheckpointIndex];
         if (currentCp) {
           const dist = calculateHaversineDistance(
@@ -499,11 +394,10 @@ export class MissionService {
             currentCp.longitude
           );
           mission.distanceToTargetMeters = Math.round(dist);
-
           const effectiveDist = Math.max(0, dist - (location.accuracy || 5) / 2);
-          const cpRadius = currentCp.radiusMeters || 25;
+          const radius = currentCp.radiusMeters || 25;
 
-          if (effectiveDist <= cpRadius) {
+          if (effectiveDist <= radius) {
             currentCp.completed = true;
             currentCp.isCompleted = true;
             currentCp.completedAt = now;
@@ -514,7 +408,7 @@ export class MissionService {
             );
 
             if (mission.currentCheckpointIndex >= mission.checkpoints.length) {
-              this.completeMission(room, mission);
+              this.completeSharedMission(room, mission, runner);
               completedList.push(mission);
             } else {
               const nextCp = mission.checkpoints[mission.currentCheckpointIndex];
@@ -529,26 +423,26 @@ export class MissionService {
           }
         }
       }
-    } else if (isSurvivalMilestone) {
-      const reqStay =
-        mission.requiredStaySeconds ||
-        (mission.milestoneMinutes ? mission.milestoneMinutes * 60 : 300);
-      const elapsed = Math.max(0, Math.floor((now - mission.assignedAt) / 1000));
-      mission.currentStaySeconds = Math.min(reqStay, elapsed);
-      mission.stayDurationSeconds = mission.currentStaySeconds;
-      mission.progress = Math.min(100, Math.round((mission.currentStaySeconds / reqStay) * 100));
 
-      if (mission.currentStaySeconds >= reqStay) {
-        this.completeMission(room, mission);
-        completedList.push(mission);
+      // 3. SURVIVAL_MILESTONE
+      else if (rawType === 'SURVIVAL_MILESTONE') {
+        const reqStay = mission.requiredStaySeconds || (mission.milestoneMinutes ? mission.milestoneMinutes * 60 : 300);
+        const gameStarted = room.match.gameStartedAt || room.match.startedAt;
+        const elapsed = Math.max(0, Math.floor((now - gameStarted) / 1000));
+        mission.currentStaySeconds = Math.min(reqStay, elapsed);
+        mission.stayDurationSeconds = mission.currentStaySeconds;
+        mission.progress = Math.min(100, Math.round((mission.currentStaySeconds / reqStay) * 100));
+
+        if (mission.currentStaySeconds >= reqStay) {
+          this.completeSharedMission(room, mission, runner);
+          completedList.push(mission);
+        }
       }
-    } else if (isCloseEncounter) {
-      if (location) {
+
+      // 4. CLOSE_ENCOUNTER
+      else if (rawType === 'CLOSE_ENCOUNTER' && location) {
         const activeChasers = Object.values(room.members).filter(
-          (m) =>
-            m.team === 'CHASERS' &&
-            m.lastLocation &&
-            Math.abs(now - m.lastLocation.timestamp) <= 30000
+          (m) => m.team === 'CHASERS' && m.lastLocation && Math.abs(now - m.lastLocation.timestamp) <= 30000
         );
 
         let nearestChaserDist = Infinity;
@@ -559,44 +453,41 @@ export class MissionService {
             chaser.lastLocation!.latitude,
             chaser.lastLocation!.longitude
           );
-          if (d < nearestChaserDist) {
-            nearestChaserDist = d;
-          }
+          if (d < nearestChaserDist) nearestChaserDist = d;
         }
 
-        mission.distanceToTargetMeters =
-          nearestChaserDist === Infinity ? undefined : Math.round(nearestChaserDist);
-
+        mission.distanceToTargetMeters = nearestChaserDist === Infinity ? undefined : Math.round(nearestChaserDist);
         const proxDist = mission.proximityDistanceMeters || mission.targetRadiusMeters || 50;
         const reqStay = mission.requiredStaySeconds || 60;
 
         if (nearestChaserDist <= proxDist) {
           mission.isInRadius = true;
-          const lastVerif = this.lastStayVerificationTime.get(mission.id);
+          const key = `${mission.id}_${runner.id}`;
+          const lastVerif = this.lastStayVerificationTime.get(key);
           const deltaSec = lastVerif ? Math.max(0, Math.round((now - lastVerif) / 1000)) : 0;
-          this.lastStayVerificationTime.set(mission.id, now);
+          this.lastStayVerificationTime.set(key, now);
 
           mission.currentStaySeconds = (mission.currentStaySeconds || 0) + deltaSec;
           mission.stayDurationSeconds = mission.currentStaySeconds;
           mission.progress = Math.min(100, Math.round((mission.currentStaySeconds / reqStay) * 100));
 
           if (mission.currentStaySeconds >= reqStay) {
-            this.completeMission(room, mission);
+            this.completeSharedMission(room, mission, runner);
             completedList.push(mission);
           }
         } else {
           mission.isInRadius = false;
-          this.lastStayVerificationTime.delete(mission.id);
+          this.lastStayVerificationTime.delete(`${mission.id}_${runner.id}`);
           mission.currentStaySeconds = 0;
           mission.stayDurationSeconds = 0;
           mission.progress = 0;
         }
       }
-    } else if (isLandmarkRecon) {
-      if (location && mission.targetLocation) {
+
+      // 5. LANDMARK_RECON
+      else if (rawType === 'LANDMARK_RECON' && location && mission.targetLocation) {
         const targetLat = mission.targetLocation.latitude ?? mission.targetLocation.lat;
         const targetLng = mission.targetLocation.longitude ?? mission.targetLocation.lng;
-
         const dist = calculateHaversineDistance(
           location.latitude,
           location.longitude,
@@ -609,70 +500,40 @@ export class MissionService {
         const radius = mission.targetRadiusMeters || 25;
 
         if (effectiveDist <= radius) {
-          if (
-            mission.landmarkClue &&
-            mission.landmarkClue.answer &&
-            !mission.landmarkClue.isAnswered
-          ) {
-            // Waiting for runner answer submission
-          } else {
-            this.completeMission(room, mission);
+          if (!mission.landmarkClue?.answer || mission.landmarkClue.isAnswered) {
+            this.completeSharedMission(room, mission, runner);
             completedList.push(mission);
           }
         }
       }
     }
 
-    return { completedMissions: completedList, updatedMission: mission };
+    const allCompleted =
+      room.match.sharedMissions.length > 0 &&
+      room.match.sharedMissions.every((m) => m.status === 'COMPLETED');
+
+    return { completedMissions: completedList, allCompleted };
   }
 
-  public answerLandmarkClue(
-    room: RoomState,
-    playerId: string,
-    answer: string
-  ): { success: boolean; completed?: boolean; error?: string } {
-    if (!room.match || !room.match.activeMissions) {
-      return { success: false, error: 'Match not active' };
-    }
+  /**
+   * Authoritatively completes a shared match mission.
+   */
+  public completeSharedMission(room: RoomState, mission: SharedMission, runner: PlayerMember): void {
+    if (mission.status === 'COMPLETED') return;
 
-    const mission = room.match.activeMissions[playerId];
-    const rawType = (mission?.type || mission?.templateType || '').toUpperCase();
-    if (!mission || rawType !== 'LANDMARK_RECON' || !mission.landmarkClue) {
-      return { success: false, error: 'No active landmark mission with clue' };
-    }
-
-    if (mission.landmarkClue.answer?.trim() !== answer.trim()) {
-      return { success: false, error: 'Incorrect intelligence code' };
-    }
-
-    mission.landmarkClue.isAnswered = true;
-
-    if (
-      mission.distanceToTargetMeters !== undefined &&
-      mission.targetRadiusMeters !== undefined &&
-      mission.distanceToTargetMeters <= mission.targetRadiusMeters
-    ) {
-      this.completeMission(room, mission);
-      return { success: true, completed: true };
-    }
-
-    return { success: true, completed: false };
-  }
-
-  public completeMission(room: RoomState, mission: ActiveMission): void {
     mission.status = 'COMPLETED';
     mission.completedAt = Date.now();
+    mission.completedByPlayerId = runner.id;
+    mission.completedByNickname = runner.nickname;
     mission.progress = 100;
 
-    this.lastCompletedTemplates.set(mission.playerId, mission.templateType);
-    this.lastStayVerificationTime.delete(mission.id);
-
+    // Award points idempotently to completing runner and the Runners team
     if (room.match?.scoreLedger) {
-      const idempotencyKey = `mission-complete:${mission.id}`;
+      const idempotencyKey = `shared_mission_${mission.id}`;
       this.scoringService.awardPoints({
         ledger: room.match.scoreLedger,
-        playerId: mission.playerId,
-        playerNickname: mission.playerNickname,
+        playerId: runner.id,
+        playerNickname: runner.nickname,
         team: 'RUNNERS',
         pointsIndividual: mission.rewardIndividual,
         pointsTeam: mission.rewardTeam,
@@ -682,44 +543,72 @@ export class MissionService {
       });
     }
 
+    // Also populate legacy completedMissions list
     if (room.match) {
       room.match.completedMissions = room.match.completedMissions || [];
       if (!room.match.completedMissions.some((m) => m.id === mission.id)) {
         room.match.completedMissions.push(mission);
       }
-      delete room.match.activeMissions?.[mission.playerId];
-    }
-
-    const runner = room.members[mission.playerId];
-    if (
-      runner &&
-      runner.team === 'RUNNERS' &&
-      !runner.isCaught &&
-      !runner.isEliminated &&
-      (room.state === 'ACTIVE' || room.state === 'RUNNER_HEADSTART')
-    ) {
-      const nextMission = this.generateRandomMission(room, runner);
-      if (nextMission && room.match?.activeMissions) {
-        room.match.activeMissions[runner.id] = nextMission;
-      }
     }
   }
 
-  public checkSurvivalMilestones(room: RoomState): ActiveMission[] {
-    if (!room.match || !room.match.activeMissions || room.state !== 'ACTIVE') {
-      return [];
+  /**
+   * Submits intelligence answer for Landmark Recon missions.
+   */
+  public answerLandmarkClue(
+    room: RoomState,
+    runnerId: string,
+    answer: string
+  ): { success: boolean; completed?: boolean; error?: string } {
+    if (!room.match || !room.match.sharedMissions) {
+      return { success: false, error: 'Match not active' };
     }
 
-    const completed: ActiveMission[] = [];
-    for (const [playerId, mission] of Object.entries(room.match.activeMissions)) {
-      const rawType = (mission.type || mission.templateType || '').toUpperCase();
-      if (rawType === 'SURVIVAL_MILESTONE' && mission.status === 'ACTIVE') {
-        const res = this.evaluateMissionProgress(room, playerId, room.members[playerId]?.lastLocation);
-        if (res.completedMissions.length > 0) {
-          completed.push(...res.completedMissions);
-        }
-      }
+    const runner = room.members[runnerId];
+    if (!runner || runner.team !== 'RUNNERS' || runner.isCaught) {
+      return { success: false, error: 'Only uncaught runners can submit intelligence codes' };
     }
-    return completed;
+
+    const landmarkMission = room.match.sharedMissions.find(
+      (m) => (m.type === 'LANDMARK_RECON' || m.templateType === 'LANDMARK_RECON') && m.status === 'ACTIVE'
+    );
+
+    if (!landmarkMission || !landmarkMission.landmarkClue) {
+      return { success: false, error: 'No active landmark mission requires verification' };
+    }
+
+    if (landmarkMission.landmarkClue.answer?.trim() !== answer.trim()) {
+      return { success: false, error: 'Incorrect intelligence code' };
+    }
+
+    landmarkMission.landmarkClue.isAnswered = true;
+
+    // If runner is in radius, complete immediately
+    if (
+      landmarkMission.distanceToTargetMeters !== undefined &&
+      landmarkMission.targetRadiusMeters !== undefined &&
+      landmarkMission.distanceToTargetMeters <= landmarkMission.targetRadiusMeters
+    ) {
+      this.completeSharedMission(room, landmarkMission, runner);
+      return { success: true, completed: true };
+    }
+
+    return { success: true, completed: false };
+  }
+
+  /**
+   * Check survival milestone progression across all active uncaught runners.
+   */
+  public checkSurvivalMilestones(room: RoomState): { completedMissions: SharedMission[]; allCompleted: boolean } {
+    if (!room.match || !room.match.sharedMissions || room.state !== 'ACTIVE') {
+      return { completedMissions: [], allCompleted: false };
+    }
+
+    const uncaughtRunner = Object.values(room.members).find(
+      (m) => m.team === 'RUNNERS' && !m.isCaught && !m.isEliminated
+    );
+    if (!uncaughtRunner) return { completedMissions: [], allCompleted: false };
+
+    return this.evaluateSharedMissions(room, uncaughtRunner, uncaughtRunner.lastLocation);
   }
 }

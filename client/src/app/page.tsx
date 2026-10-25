@@ -156,7 +156,7 @@ export default function Home() {
     },
   });
 
-  // Auto-center play zone on Host's actual GPS when first acquired (replaces London placeholder)
+  // Auto-center play zone on Host's actual GPS when first acquired (only if not already confirmed by host)
   const hasAutoCenteredHostRef = useRef(false);
   useEffect(() => {
     if (
@@ -164,13 +164,13 @@ export default function Home() {
       roomState &&
       roomState.members[playerId]?.role === 'HOST' &&
       roomState.state === 'LOBBY' &&
-      roomState.config.playZone.centerLat === 51.5074 &&
+      !roomState.config.playZone.isHostConfirmed &&
       !hasAutoCenteredHostRef.current
     ) {
       hasAutoCenteredHostRef.current = true;
-      emit('room:update_config', {
+      emit('config:update', {
         roomCode,
-        requesterId: playerId,
+        hostId: playerId,
         config: {
           playZone: {
             ...roomState.config.playZone,
@@ -212,10 +212,15 @@ export default function Home() {
     localStorage.setItem('manhunt_nickname', nickname);
 
     const serverUrl = getBackendUrl();
+    const payload = {
+      hostPlayerId: playerId,
+      nickname,
+      initialLocation: location ? { latitude: location.latitude, longitude: location.longitude } : undefined,
+    };
 
     // If socket is connected, try creating room directly over socket
     if (isConnected) {
-      emit('room:create', { hostPlayerId: playerId, nickname }, (res: any) => {
+      emit('room:create', payload, (res: any) => {
         setIsCreating(false);
         if (res?.success && res.room) {
           localStorage.setItem('manhunt_active_room_code', res.room.roomCode);
@@ -232,7 +237,7 @@ export default function Home() {
       const res = await fetch(`${serverUrl}/api/room/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostPlayerId: playerId, nickname }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success && data.room) {
@@ -241,9 +246,9 @@ export default function Home() {
       } else {
         setErrorMsg(data.error || 'Failed to create room');
       }
-    } catch {
+    } catch (err: any) {
       setErrorMsg(
-        `Backend server unreachable at ${serverUrl}. Is the backend running? Run 'cd server; npm run dev'`
+        err.message || `Backend server unreachable at ${serverUrl}. Please check your network connection.`
       );
     } finally {
       setIsCreating(false);

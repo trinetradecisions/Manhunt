@@ -41,6 +41,8 @@ export function useGeolocation({
   autoStart = false,
 }: UseGeolocationOptions = {}) {
   const [location, setLocation] = useState<PlayerLocation | null>(null);
+  const [smoothedLocation, setSmoothedLocation] = useState<PlayerLocation | null>(null);
+  const smoothedRef = useRef<PlayerLocation | null>(null);
   const [gpsStatus, setGpsStatus] = useState<ExtendedGpsStatus>('NOT_ENABLED');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<number | null>(null);
@@ -102,6 +104,26 @@ export function useGeolocation({
     };
 
     setLocation(playerLoc);
+
+    // Exponential moving average for marker smoothing on map display (raw coords preserved in playerLoc)
+    let smoothed: PlayerLocation;
+    if (!smoothedRef.current) {
+      smoothed = playerLoc;
+    } else {
+      const prev = smoothedRef.current;
+      const alpha = 0.65;
+      smoothed = {
+        latitude: prev.latitude * (1 - alpha) + playerLoc.latitude * alpha,
+        longitude: prev.longitude * (1 - alpha) + playerLoc.longitude * alpha,
+        accuracy: playerLoc.accuracy,
+        heading: playerLoc.heading ?? prev.heading,
+        speed: playerLoc.speed ?? prev.speed,
+        timestamp: playerLoc.timestamp,
+      };
+    }
+    smoothedRef.current = smoothed;
+    setSmoothedLocation(smoothed);
+
     setAccuracy(reportedAccuracy);
     setLastFixTimestamp(now);
     // Distinguish between high accuracy and weak signal (> 25m)
@@ -366,6 +388,7 @@ export function useGeolocation({
 
   return {
     location,
+    smoothedLocation,
     gpsStatus,
     errorMessage,
     errorCode,

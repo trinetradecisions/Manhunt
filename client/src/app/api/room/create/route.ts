@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
       nickname,
       role: body.role || 'HOST',
       team: body.team || 'NONE',
+      initialLocation: body.initialLocation,
     });
 
     return jsonResponse({

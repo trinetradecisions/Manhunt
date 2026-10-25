@@ -473,6 +473,42 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'zone:confirm': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/zone/confirm`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'bases:randomize': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/bases/randomize`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'exclusions:update': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/exclusions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
           case 'match:start': {
             const res = await fetch(`${backendUrl}/api/room/${code}/start`, {
               method: 'POST',

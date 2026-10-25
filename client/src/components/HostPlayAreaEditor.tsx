@@ -161,8 +161,15 @@ export default function HostPlayAreaEditor({
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
-      const initialLat = currentZone.centerLat || (myLocation ? myLocation.latitude : 51.5074);
-      const initialLng = currentZone.centerLng || (myLocation ? myLocation.longitude : -0.1278);
+      const hasValidZoneCenter = currentZone.centerLat && currentZone.centerLat !== 0;
+      const useLocation = myLocation && (!currentZone.isHostConfirmed || !hasValidZoneCenter);
+      const initialLat = useLocation ? myLocation.latitude : (hasValidZoneCenter ? currentZone.centerLat : 20.5937);
+      const initialLng = useLocation ? myLocation.longitude : (hasValidZoneCenter ? currentZone.centerLng : 78.9629);
+
+      if (useLocation && (!currentZone.centerLat || currentZone.centerLat === 0)) {
+        currentZone.centerLat = myLocation.latitude;
+        currentZone.centerLng = myLocation.longitude;
+      }
 
       const map = L.map(mapContainerRef.current, {
         zoomControl: false,
@@ -767,6 +774,7 @@ export default function HostPlayAreaEditor({
     const validatedZone: PlayZone = {
       ...currentZone,
       shapeType: currentZone.shapeType || 'CIRCLE',
+      isHostConfirmed: true,
       areaSquareMeters: metrics.area,
       perimeterMeters: metrics.perimeter,
       version: (currentZone.version || 1) + 1,

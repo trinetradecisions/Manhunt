@@ -52,32 +52,49 @@ export default function MatchResultsModal({
               isRunnerVictory ? 'text-[#39BDE8]' : 'text-[#FF4655]'
             }`}
           >
-            {isRunnerVictory ? 'RUNNERS SURVIVED' : 'CHASERS VICTORIOUS'}
+            {isRunnerVictory ? 'RUNNERS VICTORIOUS' : 'CHASERS VICTORIOUS'}
           </h2>
 
-          <p className="text-xs text-[#A8B0BA] leading-relaxed">
-            {isRunnerVictory
-              ? `${survivedCount} runner(s) evaded capture until the match clock expired.`
-              : 'All runners were hunted down before the clock expired.'}
+          <p className="text-xs text-[#ECE8E1] font-mono leading-relaxed font-semibold">
+            {roomState.match?.victoryReason ||
+              (isRunnerVictory
+                ? `${survivedCount} runner(s) evaded capture until the match clock expired.`
+                : 'All runners were hunted down before the clock expired.')}
           </p>
         </div>
 
-        {/* Quick Tactical Stats Grid */}
+        {/* Final Scores & Tactical Stats Grid */}
         <div className="grid grid-cols-2 gap-2 text-left">
+          <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
+            <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
+              Runners Score
+            </span>
+            <span className="text-base font-black font-mono text-[#39BDE8]">
+              {roomState.match?.scoreLedger?.teamScores?.RUNNERS ?? 0} PTS
+            </span>
+          </div>
+          <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
+            <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
+              Chasers Score
+            </span>
+            <span className="text-base font-black font-mono text-[#FF4655]">
+              {roomState.match?.scoreLedger?.teamScores?.CHASERS ?? 0} PTS
+            </span>
+          </div>
           <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
             <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
               Tags Confirmed
             </span>
-            <span className="text-base font-black font-mono text-white">
+            <span className="text-sm font-black font-mono text-white">
               {catches.length} / {totalRunners}
             </span>
           </div>
           <div className="bg-[#293440] border border-[#3B4652] p-2.5 rounded-xl">
             <span className="text-[10px] text-[#A8B0BA] font-mono uppercase block">
-              Survivors
+              Shared Missions
             </span>
-            <span className="text-base font-black font-mono text-[#39BDE8]">
-              {survivedCount} Operative(s)
+            <span className="text-sm font-black font-mono text-[#FFB800]">
+              {(roomState.match?.sharedMissions || []).filter((m) => m.status === 'COMPLETED').length} / {(roomState.match?.sharedMissions || []).length}
             </span>
           </div>
         </div>

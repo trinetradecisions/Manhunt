@@ -4,6 +4,7 @@ import {
   CatchAttempt,
   ChatMessage,
   DynamicZoneState,
+  ExcludedArea,
   GameConfig,
   GameState,
   MapPoint,
@@ -12,10 +13,20 @@ import {
   PlayerMember,
   PlayerRole,
   PlayerTeam,
+  PlayZone,
   RadioTransmission,
   RoomState,
+  SharedMission,
+  TacticalMarker,
 } from '../types/game';
-import { calculateHaversineDistance, checkPlayZoneBoundary, checkVelocitySanity, validateCatchProximity } from './geo';
+import {
+  calculateHaversineDistance,
+  checkPlayZoneBoundary,
+  checkVelocitySanity,
+  validateCatchProximity,
+  isPointInExcludedArea,
+  generateRandomBases,
+} from './geo';
 import { canTransitionState } from './stateMachine';
 import { ScoringService } from './scoring';
 import { MissionService } from './missions';
@@ -75,15 +86,24 @@ function generateRoomCode(): string {
   return code;
 }
 
-function getDefaultConfig(): GameConfig {
+function getDefaultConfig(initialLocation?: { latitude: number; longitude: number }): GameConfig {
+  const hasLoc =
+    initialLocation &&
+    typeof initialLocation.latitude === 'number' &&
+    typeof initialLocation.longitude === 'number';
+
   return {
     gameMode: 'CLASSIC_MANHUNT',
     durationSeconds: 900,
     playZone: {
       shapeType: 'CIRCLE',
-      centerLat: 37.7749,
-      centerLng: -122.4194,
+      // If host provided coordinates, anchor immediately; otherwise mark unconfirmed so first GPS reading sets it
+      centerLat: hasLoc ? initialLocation.latitude : 0,
+      centerLng: hasLoc ? initialLocation.longitude : 0,
       radiusMeters: 500,
+      isHostConfirmed: !!hasLoc,
+      excludedAreas: [],
+      bases: [],
       version: 1,
       updatedAt: Date.now(),
     },
@@ -166,7 +186,7 @@ export class GameStateStore {
     // 2. Active Match Clock & Zone
     if (room.state === 'ACTIVE') {
       const elapsedSinceStart = Math.max(0, Math.floor((now - room.match.gameStartedAt) / 1000));
-      const totalDuration = room.match.totalDurationSeconds || room.config.durationSeconds || 900;
+      const totalDuration = room.match.totalDurationSeconds ?? room.config.durationSeconds ?? 900;
       const remaining = Math.max(0, totalDuration - elapsedSinceStart);
 
       if (room.match.remainingSeconds !== remaining) {
@@ -189,9 +209,22 @@ export class GameStateStore {
       }
 
       // Check recurring survival milestones
-      const completedMilestones = missionService.checkSurvivalMilestones(room);
-      if (completedMilestones.length > 0) {
+      const milestoneRes = missionService.checkSurvivalMilestones(room);
+      if (milestoneRes.completedMissions.length > 0) {
         mutated = true;
+        if (milestoneRes.allCompleted && room.state === 'ACTIVE') {
+          room.state = 'COMPLETED';
+          room.match.winnerTeam = 'RUNNERS';
+          room.match.victoryReason = 'MISSION OBJECTIVES COMPLETE — All shared missions completed by Runners!';
+          if (room.match.scoreLedger) {
+            scoringService.resolveWinnerBonuses(
+              room.match.scoreLedger,
+              'RUNNERS',
+              room.members,
+              room.config.missions || missionService.getDefaultConfig()
+            );
+          }
+        }
       }
 
       // Scheduled 120s Runner Snapshot for chasers
@@ -218,25 +251,29 @@ export class GameStateStore {
       }
 
       // Check match end / timeout
-      if (remaining <= 0) {
+      if (remaining <= 0 && room.state === 'ACTIVE') {
         room.state = 'COMPLETED';
         mutated = true;
 
+        const uncaughtRunners = Object.values(room.members).filter(
+          (m) => m.team === 'RUNNERS' && !m.isCaught && !m.isEliminated
+        );
+
+        const winner: PlayerTeam = uncaughtRunners.length > 0 ? 'RUNNERS' : 'CHASERS';
+        const victoryReason = uncaughtRunners.length > 0
+          ? `TIME EXPIRED — ${uncaughtRunners.length} Runner(s) evaded capture!`
+          : 'TIME EXPIRED — All Runners were eliminated.';
+
+        room.match.winnerTeam = winner;
+        room.match.victoryReason = victoryReason;
+
         if (room.match.scoreLedger) {
-          const outcome = scoringService.determineWinningTeam(
+          scoringService.resolveWinnerBonuses(
             room.match.scoreLedger,
+            winner,
             room.members,
-            room.config.missions?.tieBreakerRule || 'DRAW'
+            room.config.missions || missionService.getDefaultConfig()
           );
-          room.match.winnerTeam = outcome.winner;
-          if (outcome.winner === 'RUNNERS' || outcome.winner === 'CHASERS') {
-            scoringService.resolveWinnerBonuses(
-              room.match.scoreLedger,
-              outcome.winner,
-              room.members,
-              room.config.missions || missionService.getDefaultConfig()
-            );
-          }
         }
       }
     }
@@ -260,6 +297,7 @@ export class GameStateStore {
     nickname: string;
     role?: PlayerRole;
     team?: PlayerTeam;
+    initialLocation?: { latitude: number; longitude: number };
   }): Promise<ExtendedRoomState> {
     let code = generateRoomCode();
     let attempts = 0;
@@ -275,14 +313,24 @@ export class GameStateStore {
       role: host.role || 'HOST',
       team: host.team || 'NONE',
       isReady: true,
-      gpsStatus: 'GRANTED',
+      gpsStatus: host.initialLocation ? 'GRANTED' : 'PROMPT',
+      lastLocation: host.initialLocation
+        ? {
+            latitude: host.initialLocation.latitude,
+            longitude: host.initialLocation.longitude,
+            accuracy: 15,
+            heading: null,
+            speed: null,
+            timestamp: Date.now(),
+          }
+        : undefined,
     };
 
     const room: ExtendedRoomState = {
       roomCode: code,
       hostId: host.id,
       state: 'LOBBY',
-      config: getDefaultConfig(),
+      config: getDefaultConfig(host.initialLocation),
       members: {
         [host.id]: hostMember,
       },
@@ -442,8 +490,8 @@ export class GameStateStore {
     }
 
     const now = Date.now();
-    const headStartMs = (room.config.globalHeadStartSeconds || 120) * 1000;
-    const matchDurationMs = (room.config.durationSeconds || 900) * 1000;
+    const headStartMs = (room.config.globalHeadStartSeconds ?? 120) * 1000;
+    const matchDurationMs = (room.config.durationSeconds ?? 900) * 1000;
 
     let dynamicZoneState: DynamicZoneState | undefined;
     if (room.config.dynamicZone?.enabled) {
@@ -479,9 +527,15 @@ export class GameStateStore {
       scoreLedger,
       activeMissions: {},
       completedMissions: [],
+      sharedMissions: [],
     };
 
-    missionService.initializeMatchMissions(room);
+    // Initialize bases if not already configured
+    if (!room.config.playZone.bases || room.config.playZone.bases.length === 0) {
+      room.config.playZone.bases = generateRandomBases(room.config.playZone, 3);
+    }
+
+    missionService.initializeSharedMissions(room);
 
     for (const m of Object.values(room.members)) {
       m.isCaught = false;
@@ -519,14 +573,41 @@ export class GameStateStore {
     member.lastLocation = location;
     member.gpsStatus = 'GRANTED';
 
+    // In LOBBY, if host location arrives and zone not confirmed by host, center the zone
+    if (room.state === 'LOBBY' && room.hostId === playerId && !room.config.playZone.isHostConfirmed) {
+      room.config.playZone.centerLat = location.latitude;
+      room.config.playZone.centerLng = location.longitude;
+      room.config.playZone.updatedAt = Date.now();
+    }
+
     let completedMissions: ActiveMission[] = [];
     let alert: any = null;
 
     if (room.state === 'ACTIVE' || room.state === 'RUNNER_HEADSTART') {
-      // Evaluate active missions for runners
+      // Evaluate shared missions for active uncaught runners
       if (member.team === 'RUNNERS' && !member.isCaught) {
-        const evalRes = missionService.evaluateMissionProgress(room, playerId, location);
-        completedMissions = evalRes.completedMissions;
+        const evalRes = missionService.evaluateSharedMissions(room, member, location);
+        completedMissions = evalRes.completedMissions as any;
+        if (evalRes.allCompleted && room.state === 'ACTIVE') {
+          room.state = 'COMPLETED';
+          if (room.match) {
+            room.match.winnerTeam = 'RUNNERS';
+            room.match.victoryReason = 'MISSION OBJECTIVES COMPLETE — All shared missions completed by Runners!';
+            if (room.match.scoreLedger) {
+              scoringService.resolveWinnerBonuses(
+                room.match.scoreLedger,
+                'RUNNERS',
+                room.members,
+                room.config.missions || missionService.getDefaultConfig()
+              );
+            }
+            await broadcastToRoom(room.roomCode, 'match:victory', {
+              winnerTeam: 'RUNNERS',
+              reason: room.match.victoryReason,
+              summary: room.match,
+            });
+          }
+        }
       }
 
       // Check boundary constraints
@@ -553,6 +634,19 @@ export class GameStateStore {
           message: `You are within ${Math.round(boundary.distanceToBoundary)}m of the boundary edge!`,
           timestamp: Date.now(),
         };
+      }
+
+      // Check excluded areas constraints
+      if (room.config.playZone.excludedAreas && room.config.playZone.excludedAreas.length > 0) {
+        const inExclusion = isPointInExcludedArea(location, room.config.playZone.excludedAreas);
+        if (inExclusion.isInside) {
+          alert = {
+            type: 'EXCLUDED_AREA_WARNING',
+            title: 'RESTRICTED SECTOR!',
+            message: `Warning: You have entered restricted area "${inExclusion.areaName || 'Restricted Zone'}". Move away immediately!`,
+            timestamp: Date.now(),
+          };
+        }
       }
     }
 
@@ -684,13 +778,23 @@ export class GameStateStore {
 
       if (uncaughtRemaining.length === 0 && room.config.missions?.earlyEndAllRunnersCaught !== false) {
         room.state = 'COMPLETED';
-        room.match.winnerTeam = 'CHASERS';
-        scoringService.resolveWinnerBonuses(
-          room.match.scoreLedger!,
-          'CHASERS',
-          room.members,
-          room.config.missions || missionService.getDefaultConfig()
-        );
+        if (room.match) {
+          room.match.winnerTeam = 'CHASERS';
+          room.match.victoryReason = 'ALL RUNNERS ELIMINATED — Chasers apprehended every target!';
+          if (room.match.scoreLedger) {
+            scoringService.resolveWinnerBonuses(
+              room.match.scoreLedger,
+              'CHASERS',
+              room.members,
+              room.config.missions || missionService.getDefaultConfig()
+            );
+          }
+          await broadcastToRoom(room.roomCode, 'match:victory', {
+            winnerTeam: 'CHASERS',
+            reason: room.match.victoryReason,
+            summary: room.match,
+          });
+        }
       }
     }
 
@@ -915,5 +1019,91 @@ export class GameStateStore {
       radioTransmissions: room.radioTransmissions || [],
       voiceSignals: filteredSignals,
     };
+  }
+
+  public static async randomizeBases(
+    roomCode: string,
+    hostId: string,
+    count: number = 3
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; bases?: TacticalMarker[]; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== hostId) return { success: false, error: 'Only host can randomize bases' };
+    if (room.state !== 'LOBBY') return { success: false, error: 'Bases can only be randomized in pre-match lobby' };
+
+    const bases = generateRandomBases(room.config.playZone, count);
+    room.config.playZone.bases = bases;
+    room.config.playZone.version = (room.config.playZone.version || 1) + 1;
+    room.config.playZone.updatedAt = Date.now();
+    room.config.playZone.updatedBy = hostId;
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+
+    return { success: true, room, bases };
+  }
+
+  public static async updateExcludedAreas(
+    roomCode: string,
+    hostId: string,
+    excludedAreas: ExcludedArea[]
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== hostId) return { success: false, error: 'Only host can configure excluded areas' };
+    if (room.state !== 'LOBBY') return { success: false, error: 'Excluded areas can only be changed before match starts' };
+
+    room.config.playZone.excludedAreas = excludedAreas;
+    room.config.playZone.version = (room.config.playZone.version || 1) + 1;
+    room.config.playZone.updatedAt = Date.now();
+    room.config.playZone.updatedBy = hostId;
+
+    // Filter out any existing bases that now lie inside an excluded area
+    if (room.config.playZone.bases && room.config.playZone.bases.length > 0) {
+      room.config.playZone.bases = room.config.playZone.bases.filter((base) => {
+        const inExcl = isPointInExcludedArea(
+          { latitude: base.lat, longitude: base.lng },
+          excludedAreas
+        );
+        return !inExcl.isInside;
+      });
+      if (room.config.playZone.bases.length < 3) {
+        room.config.playZone.bases = generateRandomBases(room.config.playZone, 3);
+      }
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+
+    return { success: true, room };
+  }
+
+  public static async confirmPlayZone(
+    roomCode: string,
+    hostId: string,
+    playZoneUpdate: Partial<PlayZone>
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== hostId) return { success: false, error: 'Only host can confirm the play zone' };
+
+    room.config.playZone = {
+      ...room.config.playZone,
+      ...playZoneUpdate,
+      isHostConfirmed: true,
+      version: (room.config.playZone.version || 1) + 1,
+      updatedAt: Date.now(),
+      updatedBy: hostId,
+    };
+
+    // Ensure bases are placed outside exclusions
+    if (!room.config.playZone.bases || room.config.playZone.bases.length === 0) {
+      room.config.playZone.bases = generateRandomBases(room.config.playZone, 3);
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+
+    return { success: true, room };
   }
 }

@@ -1,4 +1,4 @@
-import { PlayerLocation, PlayZone, MapPoint, PlayBoundaryShape } from '../types/game';
+import { PlayerLocation, PlayZone, MapPoint, PlayBoundaryShape, ExcludedArea, TacticalMarker } from '../types/game';
 
 const EARTH_RADIUS_METERS = 6371000;
 
@@ -443,6 +443,36 @@ export function checkVelocitySanity(
   return speedMps <= MAX_PERMISSIBLE_SPEED_MPS;
 }
 
+export function isPointInExcludedArea(
+  point: { latitude: number; longitude: number },
+  excludedAreas?: ExcludedArea[]
+): { isInside: boolean; area?: ExcludedArea; areaName?: string } {
+  if (!excludedAreas || excludedAreas.length === 0) {
+    return { isInside: false };
+  }
+
+  for (const area of excludedAreas) {
+    if (area.shapeType === 'CIRCLE') {
+      const radius = area.radiusMeters || 100;
+      const dist = calculateHaversineDistance(
+        point.latitude,
+        point.longitude,
+        area.centerLat,
+        area.centerLng
+      );
+      if (dist <= radius) {
+        return { isInside: true, area, areaName: area.name };
+      }
+    } else if (area.shapeType === 'POLYGON' && area.vertices && area.vertices.length >= 3) {
+      if (isPointInPolygon(point, area.vertices)) {
+        return { isInside: true, area, areaName: area.name };
+      }
+    }
+  }
+
+  return { isInside: false };
+}
+
 export function generateRandomPointInZone(
   zone: PlayZone,
   marginMeters: number = 25
@@ -451,7 +481,7 @@ export function generateRandomPointInZone(
   const centerLng = zone.centerLng;
   const maxR = Math.max(30, (zone.radiusMeters || 500) - marginMeters);
 
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 50; attempt++) {
     const angle = Math.random() * 2 * Math.PI;
     const r = Math.sqrt(Math.random()) * maxR;
 
@@ -473,11 +503,48 @@ export function generateRandomPointInZone(
       zone
     );
 
-    if (boundary.isInside) {
+    const inExclusion = isPointInExcludedArea(
+      { latitude: candidate.lat, longitude: candidate.lng },
+      zone.excludedAreas
+    );
+
+    if (boundary.isInside && !inExclusion.isInside) {
       return candidate;
     }
   }
 
   return { lat: centerLat, lng: centerLng };
+}
+
+export function generateRandomBases(zone: PlayZone, count: number = 3): TacticalMarker[] {
+  const baseNames = ['Alpha Outpost', 'Bravo Depot', 'Charlie Station', 'Delta Bunker', 'Echo Stronghold', 'Foxtrot Shelter'];
+  const markers: TacticalMarker[] = [];
+  const minSeparationMeters = 60;
+
+  for (let i = 0; i < count; i++) {
+    let chosenPoint: MapPoint | null = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const candidate = generateRandomPointInZone(zone, 30);
+      const tooClose = markers.some((m) =>
+        calculateHaversineDistance(candidate.lat, candidate.lng, m.lat, m.lng) < minSeparationMeters
+      );
+      if (!tooClose || attempt === 39) {
+        chosenPoint = candidate;
+        break;
+      }
+    }
+
+    if (chosenPoint) {
+      markers.push({
+        id: 'base_' + Math.random().toString(36).substring(2, 9),
+        lat: chosenPoint.lat,
+        lng: chosenPoint.lng,
+        label: baseNames[i % baseNames.length] || `Base ${i + 1}`,
+        type: i === 0 ? 'START_POINT' : 'SAFE_ZONE',
+      });
+    }
+  }
+
+  return markers;
 }
 

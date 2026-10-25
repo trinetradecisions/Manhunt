@@ -50,6 +50,7 @@ import PlayerDossierModal from './PlayerDossierModal';
 import LeaveRoomModal from './LeaveRoomModal';
 import VoiceDiagnosticsModal from './VoiceDiagnosticsModal';
 import GpsStatusIndicator from './GpsStatusIndicator';
+import MissionProgressDashboard from './MissionProgressDashboard';
 import { ExtendedGpsStatus } from '../hooks/useGeolocation';
 
 interface ActiveGameHUDProps {
@@ -539,127 +540,62 @@ export default function ActiveGameHUD({
           </div>
         )}
 
-        {/* Runner Active Mission Tactical Card */}
-        {isRunner && !myMember?.isCaught && activeMission && (
-          <div className="bg-[#1F2731]/95 border-2 border-[#FFB800] p-3 sm:p-3.5 rounded-2xl shadow-tactical-glow pointer-events-auto max-w-md w-full space-y-2 backdrop-blur-md">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded-lg text-[9px] font-mono font-black uppercase bg-[#FFB800] text-black">
-                  {(activeMission.type || activeMission.templateType || 'MISSION').replace(/_/g, ' ')}
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase ${
-                    activeMission.difficulty === 'EASY'
-                      ? 'text-[#4CC38A] bg-[#4CC38A]/10 border border-[#4CC38A]/30'
-                      : activeMission.difficulty === 'HARD'
-                      ? 'text-[#FF4655] bg-[#FF4655]/10 border border-[#FF4655]/30'
-                      : 'text-[#39BDE8] bg-[#39BDE8]/10 border border-[#39BDE8]/30'
-                  }`}
-                >
-                  {activeMission.difficulty}
-                </span>
-              </div>
-              <span className="text-[10px] font-mono font-bold text-[#FFB800]">
-                +{activeMission.rewardIndividual} Solo / +{activeMission.rewardTeam} Team
-              </span>
-            </div>
-
-            <div>
-              <h4 className="text-xs font-mono font-bold text-white uppercase">{activeMission.title}</h4>
-              <p className="text-[11px] text-[#ECE8E1] font-mono leading-tight mt-0.5">{activeMission.description}</p>
-            </div>
-
-            {/* Objective Distance & GPS Status */}
-            {activeMission.targetLocation && (
-              <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
-                <span className="text-[#A8B0BA] flex items-center gap-1">
-                  <Navigation className="w-3 h-3 text-[#FFB800]" />
-                  <span>Objective Target:</span>
-                </span>
-                <strong className="text-white font-mono">
-                  {myLocation
-                    ? `${Math.round(calculateHaversineDistance(myLocation.latitude, myLocation.longitude, activeMission.targetLocation.latitude ?? activeMission.targetLocation.lat, activeMission.targetLocation.longitude ?? activeMission.targetLocation.lng))}m away`
-                    : 'Searching GPS...'}
-                </strong>
-              </div>
-            )}
-
-            {/* Mission-specific Progress & Status */}
-            {activeMission.type === 'SECURE_THE_POINT' && (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono">
-                  <span className={activeMission.isInRadius ? 'text-[#4CC38A] font-bold' : 'text-[#A8B0BA]'}>
-                    {activeMission.isInRadius ? 'HOLDING ZONE (VERIFIED)' : 'MOVE INSIDE 25M RADIUS'}
+        {/* Authoritative Shared Match Mission Dashboard for All Players */}
+        {roomState.match?.sharedMissions && roomState.match.sharedMissions.length > 0 ? (
+          <MissionProgressDashboard
+            sharedMissions={roomState.match.sharedMissions}
+            scoreLedger={roomState.match.scoreLedger}
+            myPlayerId={myPlayerId}
+            myTeam={myMember?.team || 'NONE'}
+            myLocation={myLocation}
+            onAnswerLandmarkClue={onAnswerLandmarkClue}
+          />
+        ) : (
+          isRunner && !myMember?.isCaught && activeMission && (
+            <div className="bg-[#1F2731]/95 border-2 border-[#FFB800] p-3 sm:p-3.5 rounded-2xl shadow-tactical-glow pointer-events-auto max-w-md w-full space-y-2 backdrop-blur-md">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-lg text-[9px] font-mono font-black uppercase bg-[#FFB800] text-black">
+                    {(activeMission.type || activeMission.templateType || 'MISSION').replace(/_/g, ' ')}
                   </span>
-                  <span className="text-white font-bold">{activeMission.stayDurationSeconds || 0}s / {activeMission.requiredStaySeconds || 90}s</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#293440] rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-300 ${activeMission.isInRadius ? 'bg-[#4CC38A]' : 'bg-[#FFB800]'}`}
-                    style={{ width: `${Math.min(100, ((activeMission.stayDurationSeconds || 0) / (activeMission.requiredStaySeconds || 90)) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeMission.type === 'CHECKPOINT_RUN' && (
-              <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
-                <span className="text-[#A8B0BA]">Checkpoint Route:</span>
-                <strong className="text-[#FFB800]">
-                  Checkpoint {(activeMission.currentCheckpointIndex || 0) + 1} of {activeMission.checkpoints?.length || 3}
-                </strong>
-              </div>
-            )}
-
-            {activeMission.type === 'SURVIVAL_MILESTONE' && (
-              <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
-                <span className="text-[#A8B0BA]">Milestone Interval:</span>
-                <strong className="text-[#4CC38A]">Every 5 min uncaught (+50 pts)</strong>
-              </div>
-            )}
-
-            {activeMission.type === 'CLOSE_ENCOUNTER' && (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono">
-                  <span className="text-[#FF4655] font-bold">Close Encounter Time:</span>
-                  <span className="text-white font-bold">{activeMission.stayDurationSeconds || 0}s / {activeMission.requiredStaySeconds || 60}s</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#293440] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#FF4655] transition-all duration-300"
-                    style={{ width: `${Math.min(100, ((activeMission.stayDurationSeconds || 0) / (activeMission.requiredStaySeconds || 60)) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeMission.type === 'LANDMARK_RECON' && activeMission.landmarkClue && (
-              <div className="space-y-1.5 pt-1">
-                <div className="text-[10px] font-mono text-[#ECE8E1]">
-                  <strong>Clue:</strong> {activeMission.landmarkClue.question}
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={clueAnswer}
-                    onChange={(e) => setClueAnswer(e.target.value)}
-                    placeholder="Enter clue answer..."
-                    className="flex-1 bg-[#161E27] border border-[#3B4652] rounded-xl px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-[#FFB800]"
-                  />
-                  <button
-                    onClick={handleSubmitClue}
-                    disabled={isSubmittingClue || !clueAnswer.trim()}
-                    className="px-3 py-1 bg-[#FFB800] text-black font-mono font-bold text-xs rounded-xl hover:brightness-110 active:scale-95 disabled:opacity-50"
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase ${
+                      activeMission.difficulty === 'EASY'
+                        ? 'text-[#4CC38A] bg-[#4CC38A]/10 border border-[#4CC38A]/30'
+                        : activeMission.difficulty === 'HARD'
+                        ? 'text-[#FF4655] bg-[#FF4655]/10 border border-[#FF4655]/30'
+                        : 'text-[#39BDE8] bg-[#39BDE8]/10 border border-[#39BDE8]/30'
+                    }`}
                   >
-                    {isSubmittingClue ? 'Checking...' : 'Submit'}
-                  </button>
+                    {activeMission.difficulty}
+                  </span>
                 </div>
-                {clueFeedback && (
-                  <span className="text-[9px] font-mono text-[#4CC38A] block">{clueFeedback}</span>
-                )}
+                <span className="text-[10px] font-mono font-bold text-[#FFB800]">
+                  +{activeMission.rewardIndividual} Solo / +{activeMission.rewardTeam} Team
+                </span>
               </div>
-            )}
-          </div>
+
+              <div>
+                <h4 className="text-xs font-mono font-bold text-white uppercase">{activeMission.title}</h4>
+                <p className="text-[11px] text-[#ECE8E1] font-mono leading-tight mt-0.5">{activeMission.description}</p>
+              </div>
+
+              {/* Objective Distance & GPS Status */}
+              {activeMission.targetLocation && (
+                <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
+                  <span className="text-[#A8B0BA] flex items-center gap-1">
+                    <Navigation className="w-3 h-3 text-[#FFB800]" />
+                    <span>Objective Target:</span>
+                  </span>
+                  <strong className="text-white font-mono">
+                    {myLocation
+                      ? `${Math.round(calculateHaversineDistance(myLocation.latitude, myLocation.longitude, activeMission.targetLocation.latitude ?? activeMission.targetLocation.lat, activeMission.targetLocation.longitude ?? activeMission.targetLocation.lng))}m away`
+                      : 'Searching GPS...'}
+                  </strong>
+                </div>
+              )}
+            </div>
+          )
         )}
 
         {/* Runner Secret PIN Floating Bar */}

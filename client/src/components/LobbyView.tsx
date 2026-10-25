@@ -243,6 +243,16 @@ export default function LobbyView({
     chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConversationMessages.length, isMobileCommsOpen]);
 
+  // Lock body scroll when settings modal is open
+  useEffect(() => {
+    if (showSettingsModal) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
+  }, [showSettingsModal]);
+
   const handleCopyCode = () => {
     if (navigator?.clipboard) {
       navigator.clipboard.writeText(roomState.roomCode);
@@ -1483,84 +1493,91 @@ export default function LobbyView({
 
       {/* 7. Host Settings Modal */}
       {showSettingsModal && isHost && (
-        <div className="fixed inset-0 z-[900] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none">
-          <div className="bg-[#1F2731] border border-[#3B4652] w-full max-w-lg rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-[#3B4652] pb-3">
+        <div className="fixed inset-0 z-[900] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 select-none">
+          <div className="bg-[#1F2731] border border-[#3B4652] w-full max-w-xl max-h-[92vh] sm:max-h-[88vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            {/* Header (Accessible & Fixed) */}
+            <div className="shrink-0 flex items-center justify-between border-b border-[#3B4652] px-5 py-3.5">
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-[#4CC38A]" />
-                <h3 className="text-xs font-black uppercase tracking-wider text-white font-mono">
+                <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white font-mono">
                   Command Deck Settings
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowSettingsModal(false)}
-                className="text-[#A8B0BA] hover:text-white p-1"
+                className="text-[#A8B0BA] hover:text-white p-1 rounded-lg hover:bg-[#293440] transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Navigation Tabs */}
-            <div className="flex gap-1 bg-[#161e27] p-1 rounded-2xl border border-[#3B4652]">
-              <button
-                type="button"
-                onClick={() => setSettingsTab('MATCH')}
-                className={`flex-1 py-1.5 rounded-xl font-mono text-[10px] sm:text-xs font-bold uppercase transition-all ${
-                  settingsTab === 'MATCH'
-                    ? 'bg-[#293440] text-white border border-[#3B4652] shadow'
-                    : 'text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                Match
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsTab('DYNAMIC_ZONE')}
-                className={`flex-1 py-1.5 rounded-xl font-mono text-[10px] sm:text-xs font-bold uppercase transition-all flex items-center justify-center gap-1 ${
-                  settingsTab === 'DYNAMIC_ZONE'
-                    ? 'bg-[#293440] text-[#FF4655] border border-[#FF4655]/50 shadow'
-                    : 'text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                <Zap className="w-3 h-3" />
-                <span>Zone</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsTab('PLAY_AREA')}
-                className={`flex-1 py-1.5 rounded-xl font-mono text-[10px] sm:text-xs font-bold uppercase transition-all ${
-                  settingsTab === 'PLAY_AREA'
-                    ? 'bg-[#293440] text-[#39BDE8] border border-[#39BDE8]/50 shadow'
-                    : 'text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                Area
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsTab('RULES')}
-                className={`flex-1 py-1.5 rounded-xl font-mono text-[10px] sm:text-xs font-bold uppercase transition-all ${
-                  settingsTab === 'RULES'
-                    ? 'bg-[#293440] text-white border border-[#3B4652] shadow'
-                    : 'text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                Rules
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsTab('MISSIONS')}
-                className={`flex-1 py-1.5 rounded-xl font-mono text-[10px] sm:text-xs font-bold uppercase transition-all flex items-center justify-center gap-1 ${
-                  settingsTab === 'MISSIONS'
-                    ? 'bg-[#293440] text-[#FFB800] border border-[#FFB800]/50 shadow'
-                    : 'text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                <Crosshair className="w-3 h-3 text-[#FFB800]" />
-                <span>Missions</span>
-              </button>
+            {/* Navigation Tabs (Scrollable on small viewports) */}
+            <div className="shrink-0 px-4 py-2 bg-[#161e27] border-b border-[#3B4652]/60">
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('MATCH')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-[11px] font-bold uppercase transition-all whitespace-nowrap shrink-0 ${
+                    settingsTab === 'MATCH'
+                      ? 'bg-[#293440] text-white border border-[#3B4652] shadow'
+                      : 'text-[#A8B0BA] hover:text-white'
+                  }`}
+                >
+                  Match
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('DYNAMIC_ZONE')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-[11px] font-bold uppercase transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                    settingsTab === 'DYNAMIC_ZONE'
+                      ? 'bg-[#293440] text-[#FF4655] border border-[#FF4655]/50 shadow'
+                      : 'text-[#A8B0BA] hover:text-white'
+                  }`}
+                >
+                  <Zap className="w-3 h-3" />
+                  <span>Zone</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('PLAY_AREA')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-[11px] font-bold uppercase transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                    settingsTab === 'PLAY_AREA'
+                      ? 'bg-[#293440] text-[#39BDE8] border border-[#39BDE8]/50 shadow'
+                      : 'text-[#A8B0BA] hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Area</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('RULES')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-[11px] font-bold uppercase transition-all whitespace-nowrap shrink-0 ${
+                    settingsTab === 'RULES'
+                      ? 'bg-[#293440] text-white border border-[#3B4652] shadow'
+                      : 'text-[#A8B0BA] hover:text-white'
+                  }`}
+                >
+                  Rules
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsTab('MISSIONS')}
+                  className={`px-3 py-1.5 rounded-xl font-mono text-[11px] font-bold uppercase transition-all whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                    settingsTab === 'MISSIONS'
+                      ? 'bg-[#293440] text-[#FFB800] border border-[#FFB800]/50 shadow'
+                      : 'text-[#A8B0BA] hover:text-white'
+                  }`}
+                >
+                  <Crosshair className="w-3 h-3 text-[#FFB800]" />
+                  <span>Missions</span>
+                </button>
+              </div>
             </div>
+
+            {/* Single Primary Vertical Scrolling Region */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
 
             {/* TAB 1: MATCH */}
             {settingsTab === 'MATCH' && (
@@ -1827,6 +1844,61 @@ export default function LobbyView({
                   </select>
                 </div>
 
+                {/* Tactical Bases */}
+                <div className="bg-[#293440] border border-[#3B4652] rounded-2xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-white block">
+                        Tactical Bases & Checkpoints
+                      </span>
+                      <span className="text-[10px] text-[#A8B0BA] font-mono block">
+                        {roomState.config.playZone.bases?.length || 0} valid bases assigned outside exclusions
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        socket?.emit('bases:randomize', {
+                          roomCode: roomState.roomCode,
+                          hostId: myPlayerId,
+                          count: 3,
+                        });
+                      }}
+                      className="px-3 py-1.5 bg-[#4CC38A]/20 hover:bg-[#4CC38A]/30 border border-[#4CC38A] text-[#4CC38A] font-mono font-bold rounded-xl text-[10px] uppercase flex items-center gap-1.5 transition-all active:scale-95"
+                    >
+                      <Shuffle className="w-3 h-3" />
+                      <span>Randomize Bases</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Restricted Excluded Areas */}
+                <div className="bg-[#293440] border border-[#3B4652] rounded-2xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-mono font-bold text-white block">
+                        Restricted / Excluded Areas
+                      </span>
+                      <span className="text-[10px] text-[#A8B0BA] font-mono block">
+                        {roomState.config.playZone.excludedAreas?.length || 0} exclusion zone(s) defined
+                      </span>
+                    </div>
+                  </div>
+                  {roomState.config.playZone.excludedAreas && roomState.config.playZone.excludedAreas.length > 0 && (
+                    <div className="space-y-1">
+                      {roomState.config.playZone.excludedAreas.map((ex, exIdx) => (
+                        <div
+                          key={ex.id || exIdx}
+                          className="flex items-center justify-between p-2 rounded-xl bg-[#161e27] border border-[#3B4652] text-[10px] font-mono"
+                        >
+                          <span className="text-red-400 font-bold">[RESTRICTED] {ex.name}</span>
+                          <span className="text-neutral-400">{ex.shapeType} ({ex.radiusMeters || 100}m)</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1902,7 +1974,7 @@ export default function LobbyView({
 
             {/* TAB 5: MISSIONS & SCORING */}
             {settingsTab === 'MISSIONS' && (
-              <div className="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1">
+              <div className="space-y-3.5">
                 {/* 1. Caught Runner Rule */}
                 <div className="bg-[#293440] border border-[#3B4652] rounded-2xl p-3 space-y-2">
                   <label className="text-[11px] font-bold text-white block font-mono uppercase tracking-wider">
@@ -2202,28 +2274,39 @@ export default function LobbyView({
                 </div>
               </div>
             )}
-
-            {/* Pre-Match Summary Card */}
-            <div className="bg-[#161e27] border border-[#3B4652] rounded-2xl p-3 space-y-1.5 text-[10px] font-mono">
-              <span className="text-[#A8B0BA] uppercase font-bold tracking-wider block">
-                Pre-Match Configuration Summary
-              </span>
-              <div className="grid grid-cols-2 gap-1 text-white">
-                <div>Duration: <strong>{roomState.config.durationSeconds / 60} min</strong></div>
-                <div>Head Start: <strong>{roomState.config.globalHeadStartSeconds / 60} min</strong></div>
-                <div>Play Area: <strong>{roomState.config.playZone.radiusMeters}m</strong></div>
-                <div>Dynamic Zone: <strong className={roomState.config.dynamicZone?.enabled ? 'text-[#4CC38A]' : 'text-neutral-500'}>
-                  {roomState.config.dynamicZone?.enabled ? 'ACTIVE' : 'OFF'}
-                </strong></div>
-              </div>
             </div>
 
-            <button
-              onClick={() => setShowSettingsModal(false)}
-              className="w-full min-h-[44px] py-2.5 bg-[#293440] hover:bg-[#3B4652] text-white font-mono font-bold rounded-2xl text-xs uppercase transition-colors"
-            >
-              Confirm & Save
-            </button>
+            {/* Sticky Footer (Pre-Match Summary Card + Confirm & Save Button) */}
+            <div className="shrink-0 bg-[#161e27] border-t border-[#3B4652] p-3 sm:p-4 space-y-2.5">
+              <div className="bg-[#1F2731] border border-[#3B4652] rounded-2xl p-2.5 sm:p-3 text-[10px] font-mono">
+                <span className="text-[#A8B0BA] uppercase font-bold tracking-wider block mb-1">
+                  Pre-Match Configuration Summary
+                </span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-white">
+                  <div>Duration: <strong>{roomState.config.durationSeconds / 60}m</strong></div>
+                  <div>Head Start: <strong>{roomState.config.globalHeadStartSeconds / 60}m</strong></div>
+                  <div>Zone: <strong>{roomState.config.playZone.radiusMeters}m</strong></div>
+                  <div>Dynamic Zone: <strong className={roomState.config.dynamicZone?.enabled ? 'text-[#4CC38A]' : 'text-neutral-500'}>
+                    {roomState.config.dynamicZone?.enabled ? 'ACTIVE' : 'OFF'}
+                  </strong></div>
+                  <div>Missions: <strong>{(roomState.config.missions?.enabledTypes || ['SECURE_THE_POINT', 'CHECKPOINT_RUN', 'SURVIVAL_MILESTONE', 'LANDMARK_RECON']).length} Enabled</strong></div>
+                  <div>Exclusions: <strong>{roomState.config.playZone.excludedAreas?.length || 0} Areas</strong></div>
+                  <div>Random Bases: <strong>{roomState.config.playZone.bases?.length || 0} Bases</strong></div>
+                  <div>GPS Proximity: <strong className={roomState.config.missions?.catchRequiresGpsProximity ? 'text-[#4CC38A]' : 'text-[#FFB800]'}>
+                    {roomState.config.missions?.catchRequiresGpsProximity ? 'YES' : 'CODE ONLY'}
+                  </strong></div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full min-h-[44px] py-2.5 bg-[#4CC38A] hover:brightness-110 active:scale-98 text-[#0F1923] font-mono font-black rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lime-glow flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>Confirm & Save</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

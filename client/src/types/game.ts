@@ -38,6 +38,17 @@ export interface TacticalMarker {
   type: TacticalMarkerType;
 }
 
+export interface ExcludedArea {
+  id: string;
+  name: string;
+  shapeType: 'CIRCLE' | 'POLYGON';
+  centerLat: number;
+  centerLng: number;
+  radiusMeters?: number;
+  vertices?: MapPoint[];
+  createdAt?: number;
+}
+
 export interface PlayZone {
   shapeType?: PlayBoundaryShape; // 'CIRCLE' (default) | 'RECTANGLE' | 'POLYGON'
   centerLat: number; // Anchor or centroid for map centering
@@ -47,6 +58,9 @@ export interface PlayZone {
   southWest?: MapPoint; // Rectangle bottom-left
   vertices?: MapPoint[]; // Polygon boundary vertices
   markers?: TacticalMarker[]; // Named points of interest
+  bases?: TacticalMarker[]; // Randomized tactical bases & checkpoints
+  excludedAreas?: ExcludedArea[]; // Excluded hazardous or off-limits sectors
+  isHostConfirmed?: boolean; // Set when host confirms official play zone (prevents GPS overwrite)
   areaSquareMeters?: number; // Approximate calculated area
   perimeterMeters?: number; // Approximate calculated perimeter
   version?: number; // Monotonically increasing revision number
@@ -371,6 +385,11 @@ export interface ScheduledRunnerSnapshot {
   }>;
 }
 
+export interface SharedMission extends ActiveMission {
+  completedByPlayerId?: string;
+  completedByNickname?: string;
+}
+
 export interface MatchSummary {
   startedAt: number;
   headStartEndsAt: number; // exact timestamp when head-start expires
@@ -381,12 +400,14 @@ export interface MatchSummary {
   pausedAt?: number;
   totalPausedSeconds: number;
   winnerTeam?: 'RUNNERS' | 'CHASERS' | 'DRAW';
+  victoryReason?: string; // Authoritative reason for match outcome
   catches: CatchAttempt[];
   lastScheduledSnapshot?: ScheduledRunnerSnapshot;
   dynamicZoneState?: DynamicZoneState;
   scoreLedger?: ScoreLedger;
-  activeMissions?: Record<string, ActiveMission>; // playerId -> active mission
+  activeMissions?: Record<string, ActiveMission>; // legacy compatibility
   completedMissions?: ActiveMission[];
+  sharedMissions?: SharedMission[]; // Authoritative shared match missions
 }
 
 export interface RoomState {

@@ -75,9 +75,10 @@ export default function TacticalMap({
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       });
 
-      // Start view centered on configured play zone preview
-      const initialLat = myLocation ? myLocation.latitude : playZone.centerLat;
-      const initialLng = myLocation ? myLocation.longitude : playZone.centerLng;
+      // Start view centered on player GPS or configured play zone
+      const hasValidZoneCenter = playZone.centerLat && playZone.centerLat !== 0;
+      const initialLat = myLocation ? myLocation.latitude : (hasValidZoneCenter ? playZone.centerLat : 20.5937);
+      const initialLng = myLocation ? myLocation.longitude : (hasValidZoneCenter ? playZone.centerLng : 78.9629);
 
       const map = L.map(mapContainerRef.current, {
         zoomControl: false,
@@ -222,6 +223,62 @@ export default function TacticalMap({
         });
 
         L.marker([m.lat, m.lng], { icon: markerIcon }).addTo(zoneLayerRef.current);
+      }
+    }
+
+    // Render Tactical Bases (Server-randomized or host-selected)
+    if (playZone.bases && playZone.bases.length > 0) {
+      for (const base of playZone.bases) {
+        const baseHtml = `
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center;">
+            <div style="width: 16px; height: 16px; border-radius: 9999px; background-color: #4CC38A; border: 2.5px solid #ffffff; box-shadow: 0 0 10px #4CC38A; display: flex; align-items: center; justify-content: center;">
+              <div style="width: 6px; height: 6px; border-radius: 9999px; background-color: #0F1923;"></div>
+            </div>
+            <div style="background-color: rgba(15, 23, 42, 0.95); border: 1px solid #4CC38A; border-radius: 4px; padding: 1px 5px; font-size: 8px; font-weight: 800; color: #4CC38A; white-space: nowrap; margin-top: 2px; pointer-events: none;">
+              [BASE] ${base.label}
+            </div>
+          </div>
+        `;
+        const baseIcon = L.divIcon({
+          className: 'tactical-base-marker',
+          html: baseHtml,
+          iconSize: [28, 28],
+          iconAnchor: [14, 8],
+        });
+        L.marker([base.lat, base.lng], { icon: baseIcon }).addTo(zoneLayerRef.current);
+      }
+    }
+
+    // Render Excluded / Restricted Areas within the play zone
+    if (playZone.excludedAreas && playZone.excludedAreas.length > 0) {
+      for (const ex of playZone.excludedAreas) {
+        const exclOptions: L.PathOptions = {
+          color: '#ef4444',
+          weight: 2,
+          fillColor: '#ef4444',
+          fillOpacity: 0.35,
+          dashArray: '6, 6',
+        };
+
+        let exclLayer: L.Layer;
+        if (ex.shapeType === 'POLYGON' && ex.vertices && ex.vertices.length >= 3) {
+          exclLayer = L.polygon(
+            ex.vertices.map((v) => [v.lat, v.lng]),
+            exclOptions
+          );
+        } else {
+          exclLayer = L.circle(
+            [ex.centerLat, ex.centerLng],
+            { radius: ex.radiusMeters || 100, ...exclOptions }
+          );
+        }
+
+        exclLayer.bindTooltip(`[RESTRICTED] ${ex.name}`, {
+          permanent: false,
+          direction: 'center',
+          className: 'tactical-exclusion-tooltip font-mono text-[9px] font-bold text-red-400 bg-black/80 border border-red-500 rounded px-1.5 py-0.5',
+        });
+        exclLayer.addTo(zoneLayerRef.current);
       }
     }
   }, [playZone]);
