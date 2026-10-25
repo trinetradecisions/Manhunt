@@ -39,7 +39,9 @@ import {
   PhoneOff,
   LogOut,
   Activity,
+  GripVertical,
 } from 'lucide-react';
+
 import {
   RoomState,
   PlayerRole,
@@ -294,7 +296,13 @@ export default function LobbyView({
 
   const handleDragStart = (e: React.DragEvent, playerId: string) => {
     if (!isHost) return;
-    e.dataTransfer.setData('text/plain', playerId);
+    try {
+      e.dataTransfer.setData('text/plain', playerId);
+      e.dataTransfer.setData('text', playerId);
+      e.dataTransfer.effectAllowed = 'move';
+    } catch {
+      // In case dataTransfer is restricted
+    }
   };
 
   const handleDrop = (e: React.DragEvent, targetTeam: PlayerTeam) => {
@@ -302,11 +310,18 @@ export default function LobbyView({
     setDragOverZone(null);
     if (!isHost) return;
 
-    const playerId = e.dataTransfer.getData('text/plain');
+    let playerId = '';
+    try {
+      playerId = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text');
+    } catch {
+      // Ignore dataTransfer get failure
+    }
+
     if (playerId) {
       onAssignTeam(playerId, targetTeam);
     }
   };
+
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2451,43 +2466,53 @@ function PlayerCard({
     <div
       draggable={isHost}
       onDragStart={(e) => onDragStart(e, member.id)}
-      className={`min-h-[54px] flex items-center justify-between p-2.5 rounded-2xl bg-[#293440] border border-[#3B4652] shadow-sm transition-all ${
-        isHost ? 'cursor-grab active:cursor-grabbing hover:border-neutral-600' : ''
+      className={`min-h-[54px] flex items-center justify-between p-2.5 rounded-2xl bg-[#293440] border border-[#3B4652] shadow-sm transition-all select-none ${
+        isHost ? 'cursor-grab active:cursor-grabbing hover:border-neutral-500' : ''
       }`}
     >
-      <div
-        onClick={() => onSelectDossier?.(member.id)}
-        className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer group"
-        title="Click to view operative dossier & stats"
-      >
-        <PlayerAvatar nickname={member.nickname} team={member.team} size="sm" />
-        <div className="truncate flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            {isCardHost && (
-              <span title="Room Commander (Host)" className="shrink-0">
-                <Crown className="w-3.5 h-3.5 text-amber-400" />
-              </span>
-            )}
-            <span className="text-xs font-bold text-white truncate font-mono block group-hover:text-[#4CC38A] transition-colors">
-              {member.nickname}
-            </span>
-            {isMe && (
-              <span className="text-[10px] text-[#4CC38A] font-mono font-bold shrink-0">
-                (You)
-              </span>
-            )}
-          </div>
-          <span className="text-[9px] text-[#A8B0BA] font-mono block truncate">
-            {member.team === 'RUNNERS'
-              ? 'Runner Squad'
-              : member.team === 'CHASERS'
-              ? 'Chaser Squad'
-              : 'Waiting Room'}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        {isHost && (
+          <span title="Drag to assign squad" className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-[#A8B0BA] hover:text-white shrink-0">
+            <GripVertical className="w-4 h-4" />
           </span>
+        )}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectDossier?.(member.id);
+          }}
+          className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer group"
+          title="Click to view operative dossier & stats"
+        >
+          <PlayerAvatar nickname={member.nickname} team={member.team} size="sm" />
+          <div className="truncate flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isCardHost && (
+                <span title="Room Commander (Host)" className="shrink-0">
+                  <Crown className="w-3.5 h-3.5 text-amber-400" />
+                </span>
+              )}
+              <span className="text-xs font-bold text-white truncate font-mono block group-hover:text-[#4CC38A] transition-colors">
+                {member.nickname}
+              </span>
+              {isMe && (
+                <span className="text-[10px] text-[#4CC38A] font-mono font-bold shrink-0">
+                  (You)
+                </span>
+              )}
+            </div>
+            <span className="text-[9px] text-[#A8B0BA] font-mono block truncate">
+              {member.team === 'RUNNERS'
+                ? 'Runner Squad'
+                : member.team === 'CHASERS'
+                ? 'Chaser Squad'
+                : 'Waiting Room'}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
         <span
           className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-bold tracking-wider flex items-center gap-1 ${
             member.isReady
@@ -2504,7 +2529,10 @@ function PlayerCard({
           <div className="flex items-center gap-1">
             {/* Mobile Sheet Trigger */}
             <button
-              onClick={() => onSelectMobilePlayer(member.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectMobilePlayer(member.id);
+              }}
               className="lg:hidden min-h-[36px] px-2.5 py-1 bg-[#1F2731] hover:bg-[#3B4652] active:scale-95 text-[#ECE8E1] rounded-xl text-[10px] font-mono font-bold border border-[#3B4652] flex items-center gap-1"
             >
               <span>Assign</span>
@@ -2514,7 +2542,11 @@ function PlayerCard({
             {/* Desktop Native Select Dropdown */}
             <select
               value={member.team}
-              onChange={(e) => onAssignTeam(member.id, e.target.value as PlayerTeam)}
+              onChange={(e) => {
+                e.stopPropagation();
+                onAssignTeam(member.id, e.target.value as PlayerTeam);
+              }}
+              onClick={(e) => e.stopPropagation()}
               className="hidden lg:block text-[10px] bg-[#1F2731] border border-[#3B4652] rounded-xl px-2 py-1 text-[#ECE8E1] focus:outline-none cursor-pointer"
             >
               <option value="NONE">Waiting</option>
@@ -2527,6 +2559,7 @@ function PlayerCard({
     </div>
   );
 }
+
 
 function Share2Icon(props: React.SVGProps<SVGSVGElement>) {
   return (

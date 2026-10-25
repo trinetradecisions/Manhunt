@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { Redis } from '@upstash/redis';
 import {
   ActiveMission,
@@ -127,9 +130,27 @@ function getDefaultConfig(initialLocation?: { latitude: number; longitude: numbe
   };
 }
 
+function getTempRoomPath(code: string): string {
+  const tmpDir = path.join(os.tmpdir(), 'manhunt_rooms');
+  try {
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+  } catch {
+    // Ignore tmp dir creation failure
+  }
+  return path.join(tmpDir, `${code}.json`);
+}
+
 export class GameStateStore {
   private static async getRawRoom(roomCode: string): Promise<ExtendedRoomState | null> {
     const code = roomCode.toUpperCase().trim();
+
+    // 1. In-memory fast cache
+    const mem = memoryStore.get(code);
+    if (mem) return mem;
+
+    // 2. Distributed Redis cache (if configured via env)
     const redis = getRedisClient();
     if (redis) {
       try {
@@ -142,15 +163,42 @@ export class GameStateStore {
         console.warn(`[Store] Error reading room ${code} from Redis:`, err);
       }
     }
-    return memoryStore.get(code) || null;
+
+    // 3. Filesystem /tmp cache fallback (shared across invocations on warm containers)
+    try {
+      const p = getTempRoomPath(code);
+      if (fs.existsSync(p)) {
+        const fileContent = fs.readFileSync(p, 'utf8');
+        const parsed = JSON.parse(fileContent) as ExtendedRoomState;
+        if (parsed && parsed.roomCode) {
+          memoryStore.set(code, parsed);
+          return parsed;
+        }
+      }
+    } catch (err) {
+      // Ignore tmp read failure
+    }
+
+    return null;
   }
 
   private static async saveRawRoom(room: ExtendedRoomState): Promise<void> {
     const code = room.roomCode.toUpperCase().trim();
     room.version = (room.version || 0) + 1;
     room.updatedAt = Date.now();
+
+    // 1. In-memory cache
     memoryStore.set(code, room);
 
+    // 2. Filesystem /tmp cache
+    try {
+      const p = getTempRoomPath(code);
+      fs.writeFileSync(p, JSON.stringify(room), 'utf8');
+    } catch {
+      // Ignore tmp write failure
+    }
+
+    // 3. Distributed Redis cache (if configured)
     const redis = getRedisClient();
     if (redis) {
       try {
@@ -161,6 +209,7 @@ export class GameStateStore {
       }
     }
   }
+
 
   /**
    * Advances the match clock, headstarts, zone shrinks, survival milestones, and scheduled snapshots
@@ -1181,7 +1230,37 @@ export class GameStateStore {
       config: room.config,
       members: sanitizedMembers,
       match: room.match,
+      version: room.version,
+      updatedAt: room.updatedAt,
     };
+  }
+
+  public static async hydrateRoom(
+    roomState: any,
+    requesterId?: string
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    if (!roomState || !roomState.roomCode) {
+      return { success: false, error: 'Invalid room state provided for hydration' };
+    }
+    const code = roomState.roomCode.toUpperCase().trim();
+    const existing = await this.getRawRoom(code);
+
+    if (existing && existing.version >= (roomState.version || 0)) {
+      return { success: true, room: existing };
+    }
+
+    const extended: ExtendedRoomState = {
+      ...roomState,
+      roomCode: code,
+      version: Math.max(existing?.version || 0, roomState.version || 1),
+      updatedAt: Date.now(),
+      chatMessages: roomState.chatMessages || existing?.chatMessages || [],
+      radioTransmissions: roomState.radioTransmissions || existing?.radioTransmissions || [],
+      voiceSignals: roomState.voiceSignals || existing?.voiceSignals || [],
+    };
+
+    await this.saveRawRoom(extended);
+    return { success: true, room: extended };
   }
 
   public static async getSyncState(
@@ -1195,15 +1274,21 @@ export class GameStateStore {
     chatMessages?: ChatMessage[];
     radioTransmissions?: RadioTransmission[];
     voiceSignals?: any[];
+    needsHydration?: boolean;
   }> {
     const room = await this.getRoom(roomCode);
     if (!room) {
-      return { changed: false, version: 0 };
+      return { changed: false, version: 0, needsHydration: true };
+    }
+
+    if (sinceVersion && room.version < sinceVersion) {
+      return { changed: false, version: room.version, needsHydration: true };
     }
 
     if (sinceVersion && room.version <= sinceVersion) {
       return { changed: false, version: room.version };
     }
+
 
     const sanitizedRoom = this.sanitizeRoomForPlayer(room, playerId);
 

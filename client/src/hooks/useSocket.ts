@@ -106,10 +106,12 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   const playerIdRef = useRef(playerId);
   const nicknameRef = useRef(nickname);
   const lastSyncVersionRef = useRef<number>(0);
+  const roomStateRef = useRef<RoomState | null>(null);
 
   roomCodeRef.current = roomCode;
   playerIdRef.current = playerId;
   nicknameRef.current = nickname;
+  roomStateRef.current = roomState;
 
   // Event listener registry for custom events (e.g., voice, alerts)
   const listenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
@@ -143,9 +145,33 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     }
   }, []);
 
-  // Update room state and derived views
+  // Update room state and derived views with monotonic version check
   const applyRoomState = useCallback((state: RoomState) => {
-    setRoomState(state);
+    if (!state) return;
+
+    setRoomState((prev) => {
+      // Guard against stale state reverting a newer version
+      if (prev?.version && state.version && state.version < prev.version) {
+        return prev;
+      }
+
+      // If in lobby, protect against transient roster truncation from stale instances
+      if (prev?.state === 'LOBBY' && state.state === 'LOBBY' && prev.members && state.members) {
+        const prevCount = Object.keys(prev.members).length;
+        const nextCount = Object.keys(state.members).length;
+        if (nextCount < prevCount && state.version && prev.version && state.version <= prev.version) {
+          return prev;
+        }
+      }
+
+      return state;
+    });
+
+    if (state.version) {
+      lastSyncVersionRef.current = Math.max(lastSyncVersionRef.current, state.version);
+    }
+    roomStateRef.current = state;
+
     if (state.match?.lastScheduledSnapshot) {
       setScheduledSnapshot(state.match.lastScheduledSnapshot);
       setChaserPings(
@@ -160,6 +186,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
       );
     }
   }, []);
+
 
   // Ingest incoming chat message
   const handleIncomingChatMessage = useCallback((msg: ChatMessage) => {
@@ -313,8 +340,22 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
 
         if (mounted && data.success) {
           setIsConnected(true);
+
+          // If instance is cold or needs hydration and we have local room state, hydrate serverless instance!
+          if (data.needsHydration && roomStateRef.current) {
+            fetch(`${backendUrl}/api/room/${roomCode}/hydrate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                room: roomStateRef.current,
+                requesterId: pId,
+              }),
+            }).catch(() => {});
+          }
+
           if (data.changed && data.room) {
-            lastSyncVersionRef.current = data.version || lastSyncVersionRef.current;
+            const nextVersion = data.version || data.room.version || lastSyncVersionRef.current;
+            lastSyncVersionRef.current = Math.max(lastSyncVersionRef.current, nextVersion);
             applyRoomState(data.room);
             dispatchEvent('room:state', data.room);
 
@@ -338,11 +379,12 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
         }
       } finally {
         if (mounted) {
-          // Poll every 1s if match is active, 2s if in lobby
+          // Poll every 1s if match is active, 2s if in lobby with smart jitter to avoid concurrent stampedes
           const isMatchActive =
-            roomState?.state === 'ACTIVE' || roomState?.state === 'RUNNER_HEADSTART';
-          const interval = isMatchActive ? 1000 : 2000;
-          timer = setTimeout(pollSync, interval);
+            roomStateRef.current?.state === 'ACTIVE' || roomStateRef.current?.state === 'RUNNER_HEADSTART';
+          const baseInterval = isMatchActive ? 1000 : 2000;
+          const jitter = Math.floor(Math.random() * 300);
+          timer = setTimeout(pollSync, baseInterval + jitter);
         }
       }
     };
@@ -353,14 +395,14 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
       mounted = false;
       if (timer) clearTimeout(timer);
     };
-  }, [roomCode, roomState?.state, applyRoomState, dispatchEvent, handleIncomingChatMessage]);
+  }, [roomCode, applyRoomState, dispatchEvent, handleIncomingChatMessage]);
 
-  // Join room on roomCode/playerId change
+  // Join room on roomCode/playerId change with exponential backoff retry
   useEffect(() => {
     if (!roomCode || !playerId) return;
     let mounted = true;
 
-    const doJoin = async () => {
+    const doJoin = async (attempt: number = 1) => {
       const backendUrl = getBackendUrl();
       try {
         const res = await fetch(`${backendUrl}/api/room/${roomCode}/join`, {
@@ -377,12 +419,27 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             applyRoomState(data.room);
             setRoomJoinError(null);
           } else {
-            setRoomJoinError(data.error || 'Failed to join room');
+            // Auto retry on room join error (up to 4 attempts) with exponential backoff
+            if (attempt < 4) {
+              const delay = attempt * 600;
+              setTimeout(() => {
+                if (mounted) doJoin(attempt + 1);
+              }, delay);
+            } else {
+              setRoomJoinError(data.error || 'Failed to join room');
+            }
           }
         }
       } catch (err: any) {
         if (mounted) {
-          setRoomJoinError(err.message || 'Connection error joining room');
+          if (attempt < 4) {
+            const delay = attempt * 600;
+            setTimeout(() => {
+              if (mounted) doJoin(attempt + 1);
+            }, delay);
+          } else {
+            setRoomJoinError(err.message || 'Connection error joining room');
+          }
         }
       }
     };
@@ -393,6 +450,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
       mounted = false;
     };
   }, [roomCode, playerId, nickname, applyRoomState]);
+
 
   // Universal dispatch method supporting both REST serverless actions and custom events
   const emit = useCallback(
@@ -438,6 +496,24 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
           }
 
           case 'team:assign': {
+            const targetId = payload?.targetPlayerId || payload?.playerId;
+            const targetTeam = payload?.team;
+            if (targetId && targetTeam && roomStateRef.current) {
+              const current = roomStateRef.current;
+              const target = current.members[targetId];
+              if (target) {
+                const nextMembers = {
+                  ...current.members,
+                  [targetId]: {
+                    ...target,
+                    team: targetTeam,
+                    role: targetTeam === 'RUNNERS' ? 'RUNNER' : targetTeam === 'CHASERS' ? 'CHASER' : (target.id === current.hostId ? 'HOST' : 'SPECTATOR'),
+                  },
+                };
+                setRoomState({ ...current, members: nextMembers });
+              }
+            }
+
             const res = await fetch(`${backendUrl}/api/room/${code}/team/assign`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -462,6 +538,17 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
           }
 
           case 'team:set_target_chasers': {
+            if (payload?.targetCount && roomStateRef.current) {
+              const current = roomStateRef.current;
+              setRoomState({
+                ...current,
+                config: {
+                  ...current.config,
+                  targetChaserCount: Number(payload.targetCount),
+                },
+              });
+            }
+
             const res = await fetch(`${backendUrl}/api/room/${code}/team/chasers`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -472,6 +559,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             if (callback) callback(data);
             return;
           }
+
 
           case 'player:set_ready':
           case 'player:ready': {

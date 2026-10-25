@@ -417,4 +417,7 @@ export interface RoomState {
   config: GameConfig;
   members: Record<string, PlayerMember>;
   match?: MatchSummary;
+  version?: number;
+  updatedAt?: number;
 }
+
