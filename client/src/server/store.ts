@@ -1246,12 +1246,38 @@ export class GameStateStore {
     const existing = await this.getRawRoom(code);
 
     if (existing && existing.version >= (roomState.version || 0)) {
+      // Check if roomState contains any members missing from existing
+      let hasMissing = false;
+      if (roomState.members && typeof roomState.members === 'object') {
+        for (const [mId, mData] of Object.entries(roomState.members)) {
+          if (!existing.members[mId]) {
+            existing.members[mId] = mData as PlayerMember;
+            hasMissing = true;
+          }
+        }
+      }
+      if (hasMissing) {
+        existing.version = (existing.version || 1) + 1;
+        existing.updatedAt = Date.now();
+        await this.saveRawRoom(existing);
+      }
       return { success: true, room: existing };
+    }
+
+    // roomState is newer than existing: merge existing members into roomState so no concurrent joins are lost
+    const mergedMembers = { ...(roomState.members || {}) };
+    if (existing?.members) {
+      for (const [mId, mData] of Object.entries(existing.members)) {
+        if (!mergedMembers[mId]) {
+          mergedMembers[mId] = mData;
+        }
+      }
     }
 
     const extended: ExtendedRoomState = {
       ...roomState,
       roomCode: code,
+      members: mergedMembers,
       version: Math.max(existing?.version || 0, roomState.version || 1),
       updatedAt: Date.now(),
       chatMessages: roomState.chatMessages || existing?.chatMessages || [],
@@ -1266,7 +1292,8 @@ export class GameStateStore {
   public static async getSyncState(
     roomCode: string,
     playerId?: string,
-    sinceVersion?: number
+    sinceVersion?: number,
+    minMembers?: number
   ): Promise<{
     changed: boolean;
     version: number;
@@ -1279,6 +1306,10 @@ export class GameStateStore {
     const room = await this.getRoom(roomCode);
     if (!room) {
       return { changed: false, version: 0, needsHydration: true };
+    }
+
+    if (minMembers && Object.keys(room.members || {}).length < minMembers) {
+      return { changed: false, version: room.version, needsHydration: true };
     }
 
     if (sinceVersion && room.version < sinceVersion) {

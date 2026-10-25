@@ -333,8 +333,9 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
         const backendUrl = getBackendUrl();
         const pId = playerIdRef.current || '';
         const since = lastSyncVersionRef.current;
+        const minMembers = roomStateRef.current ? Object.keys(roomStateRef.current.members || {}).length : 0;
         const res = await fetch(
-          `${backendUrl}/api/room/${roomCode}/sync?since=${since}&playerId=${encodeURIComponent(pId)}`
+          `${backendUrl}/api/room/${roomCode}/sync?since=${since}&playerId=${encodeURIComponent(pId)}&minMembers=${minMembers}`
         );
         const data = await res.json();
 

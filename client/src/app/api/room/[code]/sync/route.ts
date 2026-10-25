@@ -13,8 +13,9 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const playerId = searchParams.get('playerId') || undefined;
     const sinceVersion = parseInt(searchParams.get('since') || '0', 10);
+    const minMembers = parseInt(searchParams.get('minMembers') || '0', 10);
 
-    const syncState = await GameStateStore.getSyncState(code, playerId, sinceVersion);
+    const syncState = await GameStateStore.getSyncState(code, playerId, sinceVersion, minMembers);
     return jsonResponse({
       success: true,
       ...syncState,

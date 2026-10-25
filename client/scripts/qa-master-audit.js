@@ -67,16 +67,16 @@ async function runIteration(iterationNumber, targetPlayerCount) {
   // 3. Roster Convergence Verification across all sessions
   const convStart = performance.now();
   for (const pid of playerIds) {
-    let syncRes = await fetch(`${BASE_URL}/api/room/${roomCode}/sync?since=0&playerId=${encodeURIComponent(pid)}`);
+    let syncRes = await fetch(`${BASE_URL}/api/room/${roomCode}/sync?since=0&playerId=${encodeURIComponent(pid)}&minMembers=${targetPlayerCount}`);
     let syncData = await syncRes.json();
 
-    if (syncData.needsHydration && currentRoom) {
+    if ((syncData.needsHydration || (syncData.room && Object.keys(syncData.room.members || {}).length < targetPlayerCount)) && currentRoom) {
       await fetch(`${BASE_URL}/api/room/${roomCode}/hydrate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ room: currentRoom, requesterId: pid }),
       });
-      syncRes = await fetch(`${BASE_URL}/api/room/${roomCode}/sync?since=0&playerId=${encodeURIComponent(pid)}`);
+      syncRes = await fetch(`${BASE_URL}/api/room/${roomCode}/sync?since=0&playerId=${encodeURIComponent(pid)}&minMembers=${targetPlayerCount}`);
       syncData = await syncRes.json();
     }
 
