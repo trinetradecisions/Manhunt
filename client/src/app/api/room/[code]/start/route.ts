@@ -17,6 +17,13 @@ export async function POST(
       return jsonResponse({ success: false, error: 'Host ID required' }, 400);
     }
 
+    if (body.existingRoom || body.room) {
+      const existing = await GameStateStore.getRoom(code);
+      if (!existing) {
+        await GameStateStore.hydrateRoom(body.existingRoom || body.room, hostId);
+      }
+    }
+
     const res = await GameStateStore.startMatch(code, hostId);
     if (!res.success) {
       return jsonResponse({ success: false, error: res.error }, 400);

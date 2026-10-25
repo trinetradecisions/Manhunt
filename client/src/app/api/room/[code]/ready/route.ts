@@ -18,6 +18,13 @@ export async function POST(
       return jsonResponse({ success: false, error: 'Player ID required' }, 400);
     }
 
+    if (body.existingRoom || body.room) {
+      const existing = await GameStateStore.getRoom(code);
+      if (!existing) {
+        await GameStateStore.hydrateRoom(body.existingRoom || body.room, playerId);
+      }
+    }
+
     const res = await GameStateStore.setReady(code, playerId, isReady, gpsStatus, accuracy);
     if (!res.success) {
       return jsonResponse({ success: false, error: res.error }, 400);

@@ -19,6 +19,13 @@ export async function POST(
       return jsonResponse({ success: false, error: 'Requester ID, Target Player ID, and Team required' }, 400);
     }
 
+    if (body.existingRoom || body.room) {
+      const existing = await GameStateStore.getRoom(code);
+      if (!existing) {
+        await GameStateStore.hydrateRoom(body.existingRoom || body.room, requesterId);
+      }
+    }
+
     const res = await GameStateStore.assignPlayerTeam(code, requesterId, targetPlayerId, team);
     if (!res.success) {
       return jsonResponse({ success: false, error: res.error }, 400);
