@@ -402,6 +402,18 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
 
       try {
         switch (event) {
+          case 'room:create': {
+            const res = await fetch(`${backendUrl}/api/room/create`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
           case 'room:join': {
             const res = await fetch(`${backendUrl}/api/room/${payload.roomCode}/join`, {
               method: 'POST',
