@@ -7,15 +7,15 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const hostId = body.hostPlayerId || body.hostId || 'host_' + Math.random().toString(36).substring(2, 9);
-    const nickname = body.nickname || 'Host';
+    const hostId = body.hostPlayerId || body.hostId || body.host?.id || body.playerId || 'host_' + Math.random().toString(36).substring(2, 9);
+    const nickname = body.nickname || body.host?.nickname || 'Host';
 
     const room = await GameStateStore.createRoom({
       id: hostId,
       nickname,
-      role: body.role || 'HOST',
-      team: body.team || 'NONE',
-      initialLocation: body.initialLocation,
+      role: body.role || body.host?.role || 'HOST',
+      team: body.team || body.host?.team || 'NONE',
+      initialLocation: body.initialLocation || body.host?.initialLocation,
     });
 
     return jsonResponse({
