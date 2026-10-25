@@ -11,7 +11,8 @@ export async function POST(
   try {
     const { code } = await params;
     const body = await req.json().catch(() => ({}));
-    const { playerId, isReady, gpsStatus, accuracy } = body;
+    const { playerId, gpsStatus, accuracy } = body;
+    const isReady = body.ready !== undefined ? body.ready : body.isReady;
 
     if (!playerId) {
       return jsonResponse({ success: false, error: 'Player ID required' }, 400);

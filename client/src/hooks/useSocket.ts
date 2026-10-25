@@ -437,6 +437,43 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'team:assign': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/team/assign`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'team:auto_assign': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/team/auto`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'team:set_target_chasers': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/team/chasers`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'player:set_ready':
           case 'player:ready': {
             const res = await fetch(`${backendUrl}/api/room/${code}/ready`, {
               method: 'POST',
@@ -449,6 +486,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'player:set_role':
           case 'player:role': {
             const res = await fetch(`${backendUrl}/api/room/${code}/role`, {
               method: 'POST',
@@ -461,8 +499,21 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'room:update_config':
           case 'config:update': {
             const res = await fetch(`${backendUrl}/api/room/${code}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'room:update_play_zone': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/zone/update`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
@@ -547,8 +598,33 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'catch:attempt':
           case 'catch:attempt_code': {
             const res = await fetch(`${backendUrl}/api/room/${code}/catch/attempt`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'match:safety_pause': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/pause`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'match:resume': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/resume`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),

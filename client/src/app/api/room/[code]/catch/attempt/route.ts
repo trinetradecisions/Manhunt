@@ -11,7 +11,9 @@ export async function POST(
   try {
     const { code } = await params;
     const body = await req.json().catch(() => ({}));
-    const { chaserId, runnerId, catchCode } = body;
+    const chaserId = body.chaserId || body.playerId;
+    const runnerId = body.runnerId || body.targetRunnerId;
+    const catchCode = body.catchCode;
 
     if (!chaserId || !runnerId || !catchCode) {
       return jsonResponse({ success: false, error: 'Chaser ID, Runner ID, and Catch Code required' }, 400);

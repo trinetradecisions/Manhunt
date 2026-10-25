@@ -423,6 +423,218 @@ export class GameStateStore {
     return { success: true, room };
   }
 
+  public static async assignPlayerTeam(
+    roomCode: string,
+    requesterId: string,
+    targetPlayerId: string,
+    team: PlayerTeam
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== requesterId) {
+      return { success: false, error: 'Only Host can assign teams' };
+    }
+
+    const member = room.members[targetPlayerId];
+    if (!member) return { success: false, error: 'Target player not in room' };
+
+    member.team = team;
+    if (team === 'RUNNERS') {
+      member.role = 'RUNNER';
+      if (!member.catchCode) {
+        member.catchCode = Math.floor(1000 + Math.random() * 9000).toString();
+      }
+    } else if (team === 'CHASERS') {
+      member.role = 'CHASER';
+      delete member.catchCode;
+    } else {
+      member.team = 'NONE';
+      member.role = member.id === room.hostId ? 'HOST' : 'SPECTATOR';
+      delete member.catchCode;
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    return { success: true, room };
+  }
+
+  public static async autoAssignTeams(
+    roomCode: string,
+    requesterId: string
+  ): Promise<{
+    success: boolean;
+    room?: ExtendedRoomState;
+    chasersCount?: number;
+    runnersCount?: number;
+    error?: string;
+  }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== requesterId) {
+      return { success: false, error: 'Only Host can auto-assign teams' };
+    }
+
+    const eligible = Object.values(room.members).filter((m) => m.role !== 'REFEREE');
+    if (eligible.length < 2) {
+      return {
+        success: false,
+        error: 'Requires at least 2 players to auto-assign teams (1 Runner & 1 Chaser)',
+      };
+    }
+
+    const desiredChasers = Math.max(
+      1,
+      Math.min(room.config.targetChaserCount || 1, eligible.length - 1)
+    );
+
+    const shuffled = [...eligible].sort(() => Math.random() - 0.5);
+    const chasers = shuffled.slice(0, desiredChasers);
+    const runners = shuffled.slice(desiredChasers);
+
+    for (const m of chasers) {
+      m.team = 'CHASERS';
+      m.role = 'CHASER';
+      delete m.catchCode;
+    }
+
+    for (const m of runners) {
+      m.team = 'RUNNERS';
+      m.role = 'RUNNER';
+      if (!m.catchCode) {
+        m.catchCode = Math.floor(1000 + Math.random() * 9000).toString();
+      }
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    await broadcastToRoom(room.roomCode, 'match:alert', {
+      type: 'INFO',
+      title: 'Teams Auto-Assigned',
+      message: `Assigned ${chasers.length} Chaser(s) and ${runners.length} Runner(s).`,
+      timestamp: Date.now(),
+    });
+
+    return {
+      success: true,
+      room,
+      chasersCount: chasers.length,
+      runnersCount: runners.length,
+    };
+  }
+
+  public static async setTargetChaserCount(
+    roomCode: string,
+    requesterId: string,
+    targetCount: number
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== requesterId) {
+      return { success: false, error: 'Only Host can configure chaser count' };
+    }
+
+    const totalEligible = Object.values(room.members).filter((m) => m.role !== 'REFEREE').length;
+    if (targetCount < 1) {
+      return { success: false, error: 'Target chaser count must be at least 1' };
+    }
+    if (totalEligible > 1 && targetCount >= totalEligible) {
+      return {
+        success: false,
+        error: `Must leave at least 1 runner (Max ${totalEligible - 1} chasers for ${totalEligible} players)`,
+      };
+    }
+
+    room.config.targetChaserCount = targetCount;
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    return { success: true, room };
+  }
+
+  public static async setPlayerRole(
+    roomCode: string,
+    requesterId: string,
+    targetPlayerId: string,
+    newRole: PlayerRole
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== requesterId) {
+      return { success: false, error: 'Only Host can assign roles' };
+    }
+
+    const member = room.members[targetPlayerId];
+    if (!member) return { success: false, error: 'Target player not in room' };
+
+    member.role = newRole;
+    if (newRole === 'RUNNER') {
+      member.team = 'RUNNERS';
+      if (!member.catchCode) {
+        member.catchCode = Math.floor(1000 + Math.random() * 9000).toString();
+      }
+    } else if (newRole === 'CHASER') {
+      member.team = 'CHASERS';
+      delete member.catchCode;
+    } else if (newRole === 'REFEREE') {
+      member.team = 'NONE';
+      delete member.catchCode;
+    } else {
+      member.team = 'NONE';
+      delete member.catchCode;
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    return { success: true, room };
+  }
+
+  public static async safetyPause(
+    roomCode: string,
+    initiatorId: string,
+    reason?: string
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.state !== 'ACTIVE' && room.state !== 'RUNNER_HEADSTART') {
+      return { success: false, error: 'Match is not in progress' };
+    }
+
+    room.state = 'SAFETY_PAUSED';
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    await broadcastToRoom(room.roomCode, 'match:alert', {
+      type: 'WARNING',
+      title: 'Safety Pause Active',
+      message: reason || 'Match paused for player safety.',
+      timestamp: Date.now(),
+    });
+    return { success: true, room };
+  }
+
+  public static async resumeMatch(
+    roomCode: string,
+    initiatorId: string
+  ): Promise<{ success: boolean; room?: ExtendedRoomState; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.hostId !== initiatorId) {
+      return { success: false, error: 'Only Host can resume paused match' };
+    }
+    if (room.state !== 'SAFETY_PAUSED') {
+      return { success: false, error: 'Match is not paused' };
+    }
+
+    room.state = 'ACTIVE';
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+    await broadcastToRoom(room.roomCode, 'match:alert', {
+      type: 'INFO',
+      title: 'Match Resumed',
+      message: 'Tactical pursuit active.',
+      timestamp: Date.now(),
+    });
+    return { success: true, room };
+  }
+
   public static async setRole(
     roomCode: string,
     playerId: string,

@@ -11,7 +11,7 @@ export async function POST(
   try {
     const { code } = await params;
     const body = await req.json().catch(() => ({}));
-    const { hostId } = body;
+    const hostId = body.hostId || body.initiatorId || body.requesterId || body.playerId;
 
     if (!hostId) {
       return jsonResponse({ success: false, error: 'Host ID required' }, 400);
