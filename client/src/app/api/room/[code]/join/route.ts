@@ -16,6 +16,10 @@ export async function POST(
     const role = body.role || body.player?.role;
     const team = body.team || body.player?.team;
 
+    if (body.existingRoom || body.room) {
+      await GameStateStore.hydrateRoom(body.existingRoom || body.room, playerId);
+    }
+
     const res = await GameStateStore.joinRoom(code, {
       id: playerId,
       nickname,

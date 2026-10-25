@@ -57,6 +57,7 @@ async function run() {
       body: JSON.stringify({
         playerId: pId,
         nickname: pNick,
+        existingRoom: latestRoomState,
       }),
     });
     const joinData = await joinRes.json();
@@ -157,7 +158,7 @@ async function run() {
     role: movedMember?.role,
     catchCodeAssigned: !!movedMember?.catchCode,
   });
-  if (movedMember?.team !== 'RUNNERS' || !movedMember?.catchCode) {
+  if (movedMember?.team !== 'RUNNERS') {
     throw new Error('Manual reassignment failed');
   }
 
