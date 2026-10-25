@@ -1,13 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import Pusher from 'pusher-js';
 import {
   RoomState,
   CatchAttempt,
   RadioTransmission,
   ChatMessage,
-  ChatRecipientType,
   ScheduledRunnerSnapshot,
   PlayerLocation,
 } from '../types/game';
@@ -35,9 +34,6 @@ export interface SocketDiagnostics {
 }
 
 export function useSocket(roomCode?: string, playerId?: string, nickname?: string) {
-  const socketRef = useRef<Socket | null>(null);
-  const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
-
   // Core gameplay states
   const [isConnected, setIsConnected] = useState(false);
   const [roomState, setRoomState] = useState<RoomState | null>(null);
@@ -51,7 +47,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   const [incomingRadio, setIncomingRadio] = useState<RadioTransmission | null>(null);
   const [roomJoinError, setRoomJoinError] = useState<string | null>(null);
 
-  // Scheduled 120s runner snapshots for Chasers
+  // Scheduled runner snapshots for Chasers
   const [scheduledSnapshot, setScheduledSnapshot] = useState<ScheduledRunnerSnapshot | null>(null);
 
   // Live teammate updates
@@ -60,7 +56,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   // Countdown tick (5, 4, 3, 2, 1)
   const [countdownTick, setCountdownTick] = useState<number | null>(null);
 
-  // Tactical In-Game Chat state (Distinct channels)
+  // Tactical In-Game Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [channelMessages, setChannelMessages] = useState<Record<string, ChatMessage[]>>({
     PUBLIC: [],
@@ -80,7 +76,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   activeChatChannelRef.current = activeChatChannel;
   const isChatOpenRef = useRef<boolean>(false);
 
-  // Legacy chaser pings (fallback)
+  // Legacy chaser pings
   const [chaserPings, setChaserPings] = useState<
     Array<{
       playerId: string;
@@ -97,7 +93,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     status: 'INITIALIZING',
     socketId: null,
     serverUrl: getBackendUrl(),
-    activeTransport: 'none',
+    activeTransport: 'serverless-sync',
     reconnectAttempts: 0,
     lastError: null,
     lastErrorTimestamp: null,
@@ -106,176 +102,54 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     latencyMs: null,
   });
 
-  // Keep latest parameters in refs so socket listeners always access current values without reconnecting
   const roomCodeRef = useRef(roomCode);
   const playerIdRef = useRef(playerId);
   const nicknameRef = useRef(nickname);
+  const lastSyncVersionRef = useRef<number>(0);
 
   roomCodeRef.current = roomCode;
   playerIdRef.current = playerId;
   nicknameRef.current = nickname;
 
-  // Single persistent socket connection lifecycle
-  useEffect(() => {
-    const backendUrl = getBackendUrl();
-    setDiagnostics((prev) => ({ ...prev, status: 'CONNECTING', serverUrl: backendUrl }));
+  // Event listener registry for custom events (e.g., voice, alerts)
+  const listenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
 
-    const socket = io(backendUrl, {
-      transports: ['polling', 'websocket'],
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 25,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-    });
+  const addListener = useCallback((event: string, callback: (data: any) => void) => {
+    let set = listenersRef.current.get(event);
+    if (!set) {
+      set = new Set();
+      listenersRef.current.set(event, set);
+    }
+    set.add(callback);
+  }, []);
 
-    socketRef.current = socket;
-    setSocketInstance(socket);
+  const removeListener = useCallback((event: string, callback: (data: any) => void) => {
+    const set = listenersRef.current.get(event);
+    if (set) {
+      set.delete(callback);
+    }
+  }, []);
 
-    const updateTransport = () => {
-      try {
-        const transport = (socket.io?.engine as any)?.transport?.name || 'unknown';
-        setDiagnostics((prev) => ({ ...prev, activeTransport: transport }));
-      } catch {
-        // Safe fallback
-      }
-    };
+  const dispatchEvent = useCallback((event: string, data: any) => {
+    const set = listenersRef.current.get(event);
+    if (set) {
+      set.forEach((cb) => {
+        try {
+          cb(data);
+        } catch (err) {
+          console.error(`Error in socket listener for ${event}:`, err);
+        }
+      });
+    }
+  }, []);
 
-    socket.on('connect', () => {
-      setIsConnected(true);
-      const transport = (socket.io?.engine as any)?.transport?.name || 'unknown';
-
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'CONNECTED',
-        socketId: socket.id || null,
-        activeTransport: transport,
-        lastError: null,
-        disconnectReason: null,
-      }));
-
-      if (socket.io?.engine) {
-        socket.io.engine.on('upgrade', () => {
-          updateTransport();
-        });
-      }
-
-      // Re-join active room if player identity is set
-      const curRoom = roomCodeRef.current;
-      const curPlayer = playerIdRef.current;
-      const curNick = nicknameRef.current;
-
-      if (curRoom && curPlayer) {
-        socket.emit(
-          'room:join',
-          { roomCode: curRoom, playerId: curPlayer, nickname: curNick },
-          (res: any) => {
-            if (res?.success && res.room) {
-              setRoomState(res.room);
-              setRoomJoinError(null);
-            } else {
-              setRoomJoinError(res?.error || 'Room not found or expired');
-            }
-          }
-        );
-      }
-    });
-
-    socket.on('disconnect', (reason) => {
-      setIsConnected(false);
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'DISCONNECTED',
-        socketId: null,
-        disconnectReason: reason,
-        disconnectTimestamp: Date.now(),
-      }));
-    });
-
-    socket.on('connect_error', (err) => {
-      setIsConnected(false);
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'ERROR',
-        lastError: err.message || 'Connection error',
-        lastErrorTimestamp: Date.now(),
-      }));
-    });
-
-    socket.io.on('reconnect_attempt', (attempt) => {
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'RECONNECTING',
-        reconnectAttempts: attempt,
-      }));
-    });
-
-    socket.io.on('reconnect', () => {
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'CONNECTED',
-        reconnectAttempts: 0,
-        lastError: null,
-      }));
-    });
-
-    socket.io.on('reconnect_error', (err) => {
-      setDiagnostics((prev) => ({
-        ...prev,
-        lastError: `Reconnect failed: ${err.message}`,
-        lastErrorTimestamp: Date.now(),
-      }));
-    });
-
-    socket.io.on('reconnect_failed', () => {
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'ERROR',
-        lastError: 'Max reconnection attempts reached',
-        lastErrorTimestamp: Date.now(),
-      }));
-    });
-
-    // Game state listeners
-    socket.on('room:state', (updatedState: RoomState) => {
-      setRoomState(updatedState);
-      if (updatedState.match?.lastScheduledSnapshot) {
-        setScheduledSnapshot(updatedState.match.lastScheduledSnapshot);
-      }
-    });
-
-    socket.on('match:alert', (alert) => {
-      setRecentAlert(alert);
-      if (alert.type !== 'SAFETY_PAUSE') {
-        setTimeout(() => setRecentAlert(null), 6000);
-      }
-    });
-
-    socket.on('match:countdown_tick', ({ remainingSeconds }) => {
-      setCountdownTick(remainingSeconds);
-      if (remainingSeconds <= 0) {
-        setCountdownTick(null);
-      }
-    });
-
-    socket.on('catch:pending', (attempt: CatchAttempt) => {
-      setPendingCatch(attempt);
-    });
-
-    socket.on('catch:resolved', () => {
-      setPendingCatch(null);
-    });
-
-    socket.on('radio:incoming', (transmission: RadioTransmission) => {
-      setIncomingRadio(transmission);
-    });
-
-    socket.on('location:scheduled_snapshot', (snapshot: ScheduledRunnerSnapshot) => {
-      setScheduledSnapshot(snapshot);
-      // Map to legacy chaserPings format for tactical map compatibility
+  // Update room state and derived views
+  const applyRoomState = useCallback((state: RoomState) => {
+    setRoomState(state);
+    if (state.match?.lastScheduledSnapshot) {
+      setScheduledSnapshot(state.match.lastScheduledSnapshot);
       setChaserPings(
-        snapshot.runners.map((r) => ({
+        state.match.lastScheduledSnapshot.runners.map((r) => ({
           playerId: r.playerId,
           nickname: r.nickname,
           latitude: r.latitude,
@@ -284,100 +158,435 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
           ageSeconds: r.snapshotAgeSeconds,
         }))
       );
+    }
+  }, []);
+
+  // Ingest incoming chat message
+  const handleIncomingChatMessage = useCallback((msg: ChatMessage) => {
+    setChatMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev, msg];
     });
 
-    socket.on('location:teammate_update', ({ playerId: tId, location: tLoc }) => {
-      setTeammateLocations((prev) => ({
+    let chKey = msg.channelId?.toUpperCase() || 'PUBLIC';
+    if (chKey === 'ALL') chKey = 'PUBLIC';
+    if (chKey === 'TEAM') chKey = 'SQUAD';
+
+    setChannelMessages((prev) => {
+      const currentChannelMsgs = prev[chKey] || [];
+      if (currentChannelMsgs.some((m) => m.id === msg.id)) return prev;
+      return {
         ...prev,
-        [tId]: tLoc,
-      }));
-    });
-
-    socket.on('location:batch_pings', ({ pings }) => {
-      setChaserPings(pings);
-    });
-
-    // Chat listeners (multi-channel isolation)
-    socket.on('chat:message', (message: ChatMessage) => {
-      // 1. Update aggregated list
-      setChatMessages((prev) => [...prev, message]);
-
-      // 2. Resolve destination channel key
-      let chKey = message.channelId?.toUpperCase() || 'PUBLIC';
-      if (chKey === 'ALL') chKey = 'PUBLIC';
-      if (chKey === 'TEAM') chKey = 'SQUAD';
-
-      setChannelMessages((prev) => ({
-        ...prev,
-        [chKey]: [...(prev[chKey] || []), message],
-      }));
-
-      // 3. Track unread badges per channel
-      const isViewingThisChannel =
-        isChatOpenRef.current && activeChatChannelRef.current === chKey;
-      if (!isViewingThisChannel && message.senderId !== playerIdRef.current) {
-        setUnreadChatCount((prev) => prev + 1);
-        setUnreadByChannel((prev) => ({
-          ...prev,
-          [chKey]: (prev[chKey] || 0) + 1,
-        }));
-      }
-    });
-
-    socket.on('chat:history', (history: ChatMessage[]) => {
-      setChatMessages(history);
-      // Partition history by channel
-      const partitioned: Record<string, ChatMessage[]> = {
-        PUBLIC: [],
-        SQUAD: [],
-        RUNNERS: [],
-        CHASERS: [],
+        [chKey]: [...currentChannelMsgs, msg],
       };
-      history.forEach((msg) => {
-        let ch = msg.channelId?.toUpperCase() || (msg.recipientType === 'ALL' ? 'PUBLIC' : 'SQUAD');
-        if (!partitioned[ch]) partitioned[ch] = [];
-        partitioned[ch].push(msg);
-      });
-      setChannelMessages((prev) => ({ ...prev, ...partitioned }));
     });
 
+    const isViewing = isChatOpenRef.current && activeChatChannelRef.current === chKey;
+    if (!isViewing && msg.senderId !== playerIdRef.current) {
+      setUnreadChatCount((prev) => prev + 1);
+      setUnreadByChannel((prev) => ({
+        ...prev,
+        [chKey]: (prev[chKey] || 0) + 1,
+      }));
+    }
+  }, []);
+
+  // Initial Health Check
+  useEffect(() => {
+    let mounted = true;
+    const checkHealth = async () => {
+      const backendUrl = getBackendUrl();
+      const start = performance.now();
+      try {
+        const res = await fetch(`${backendUrl}/api/health`);
+        const data = await res.json();
+        if (mounted && data.status === 'healthy') {
+          const latency = Math.round(performance.now() - start);
+          setIsConnected(true);
+          setDiagnostics((prev) => ({
+            ...prev,
+            status: 'CONNECTED',
+            activeTransport: data.realtime === 'pusher' ? 'pusher+http' : 'serverless-sync',
+            serverUrl: backendUrl,
+            latencyMs: latency,
+            lastError: null,
+          }));
+        }
+      } catch (err: any) {
+        if (mounted) {
+          setIsConnected(false);
+          setDiagnostics((prev) => ({
+            ...prev,
+            status: 'ERROR',
+            lastError: err.message || 'Health check failed',
+            lastErrorTimestamp: Date.now(),
+          }));
+        }
+      }
+    };
+
+    checkHealth();
     return () => {
-      socket.disconnect();
+      mounted = false;
     };
   }, []);
 
-  // Separate effect to join room when roomCode/playerId becomes available or changes
+  // Pusher Realtime Subscription (if NEXT_PUBLIC_PUSHER_KEY is provided)
   useEffect(() => {
-    const socket = socketRef.current;
-    if (socket && socket.connected && roomCode && playerId) {
-      socket.emit('room:join', { roomCode, playerId, nickname }, (res: any) => {
-        if (res?.success && res.room) {
-          setRoomState(res.room);
-          setRoomJoinError(null);
-        } else {
-          setRoomJoinError(res?.error || 'Room not found or expired');
-        }
+    const pusherKey = process.env.NEXT_PUBLIC_PUSHER_KEY;
+    const pusherCluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'mt1';
+    if (!pusherKey || !roomCode) return;
+
+    let pusherClient: Pusher | null = null;
+    try {
+      pusherClient = new Pusher(pusherKey, {
+        cluster: pusherCluster,
       });
-    }
-  }, [roomCode, playerId, nickname]);
 
-  const emit = useCallback((event: string, payload: any, callback?: (res: any) => void) => {
-    if (socketRef.current?.connected) {
-      if (callback) {
-        socketRef.current.emit(event, payload, callback);
-      } else {
-        socketRef.current.emit(event, payload);
+      const channel = pusherClient.subscribe(`room-${roomCode.toUpperCase()}`);
+
+      channel.bind('room:update', (data: RoomState) => {
+        applyRoomState(data);
+        dispatchEvent('room:state', data);
+      });
+
+      channel.bind('match:countdown_tick', (data: { remainingSeconds: number }) => {
+        setCountdownTick(data.remainingSeconds);
+        if (data.remainingSeconds <= 0) setCountdownTick(null);
+        dispatchEvent('match:countdown_tick', data);
+      });
+
+      channel.bind('location:teammate_update', (data: { playerId: string; location: PlayerLocation }) => {
+        setTeammateLocations((prev) => ({ ...prev, [data.playerId]: data.location }));
+        dispatchEvent('location:teammate_update', data);
+      });
+
+      channel.bind('catch:confirmed', (data: CatchAttempt) => {
+        dispatchEvent('catch:confirmed', data);
+      });
+
+      channel.bind('catch:pending', (data: CatchAttempt) => {
+        setPendingCatch(data);
+        dispatchEvent('catch:pending', data);
+      });
+
+      channel.bind('chat:message', (data: ChatMessage) => {
+        handleIncomingChatMessage(data);
+        dispatchEvent('chat:message', data);
+      });
+
+      channel.bind('radio:transmission', (data: RadioTransmission) => {
+        setIncomingRadio(data);
+        dispatchEvent('radio:incoming', data);
+      });
+
+      channel.bind('voice:signal', (data: any) => {
+        dispatchEvent('voice:signal', data);
+      });
+    } catch (err) {
+      console.warn('[Pusher] Client subscription failed:', err);
+    }
+
+    return () => {
+      if (pusherClient && roomCode) {
+        pusherClient.unsubscribe(`room-${roomCode.toUpperCase()}`);
+        pusherClient.disconnect();
       }
-    }
-  }, []);
+    };
+  }, [roomCode, applyRoomState, dispatchEvent, handleIncomingChatMessage]);
 
-  // Send Chat message across explicit channels (PUBLIC, SQUAD, RUNNERS, CHASERS, DIRECT)
+  // Serverless Smart Delta Polling Loop
+  useEffect(() => {
+    if (!roomCode) return;
+    let mounted = true;
+    let timer: NodeJS.Timeout | null = null;
+
+    const pollSync = async () => {
+      try {
+        const backendUrl = getBackendUrl();
+        const pId = playerIdRef.current || '';
+        const since = lastSyncVersionRef.current;
+        const res = await fetch(
+          `${backendUrl}/api/room/${roomCode}/sync?since=${since}&playerId=${encodeURIComponent(pId)}`
+        );
+        const data = await res.json();
+
+        if (mounted && data.success) {
+          setIsConnected(true);
+          if (data.changed && data.room) {
+            lastSyncVersionRef.current = data.version || lastSyncVersionRef.current;
+            applyRoomState(data.room);
+            dispatchEvent('room:state', data.room);
+
+            if (data.chatMessages && Array.isArray(data.chatMessages)) {
+              data.chatMessages.forEach((msg: ChatMessage) => handleIncomingChatMessage(msg));
+            }
+
+            if (data.radioTransmissions && data.radioTransmissions.length > 0) {
+              const latest = data.radioTransmissions[data.radioTransmissions.length - 1];
+              setIncomingRadio(latest);
+            }
+
+            if (data.voiceSignals && Array.isArray(data.voiceSignals)) {
+              data.voiceSignals.forEach((sig: any) => dispatchEvent('voice:signal', sig));
+            }
+          }
+        }
+      } catch (err: any) {
+        if (mounted) {
+          console.warn('[Sync] Poll error:', err.message);
+        }
+      } finally {
+        if (mounted) {
+          // Poll every 1s if match is active, 2s if in lobby
+          const isMatchActive =
+            roomState?.state === 'ACTIVE' || roomState?.state === 'RUNNER_HEADSTART';
+          const interval = isMatchActive ? 1000 : 2000;
+          timer = setTimeout(pollSync, interval);
+        }
+      }
+    };
+
+    pollSync();
+
+    return () => {
+      mounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [roomCode, roomState?.state, applyRoomState, dispatchEvent, handleIncomingChatMessage]);
+
+  // Join room on roomCode/playerId change
+  useEffect(() => {
+    if (!roomCode || !playerId) return;
+    let mounted = true;
+
+    const doJoin = async () => {
+      const backendUrl = getBackendUrl();
+      try {
+        const res = await fetch(`${backendUrl}/api/room/${roomCode}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            playerId,
+            nickname: nickname || 'Operative',
+          }),
+        });
+        const data = await res.json();
+        if (mounted) {
+          if (data.success && data.room) {
+            applyRoomState(data.room);
+            setRoomJoinError(null);
+          } else {
+            setRoomJoinError(data.error || 'Failed to join room');
+          }
+        }
+      } catch (err: any) {
+        if (mounted) {
+          setRoomJoinError(err.message || 'Connection error joining room');
+        }
+      }
+    };
+
+    doJoin();
+
+    return () => {
+      mounted = false;
+    };
+  }, [roomCode, playerId, nickname, applyRoomState]);
+
+  // Universal dispatch method supporting both REST serverless actions and custom events
+  const emit = useCallback(
+    async (event: string, payload: any, callback?: (res: any) => void) => {
+      const backendUrl = getBackendUrl();
+      const code = payload?.roomCode || roomCodeRef.current;
+
+      try {
+        switch (event) {
+          case 'room:join': {
+            const res = await fetch(`${backendUrl}/api/room/${payload.roomCode}/join`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'room:leave': {
+            const res = await fetch(`${backendUrl}/api/room/${payload.roomCode}/leave`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'player:ready': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/ready`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'player:role': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/role`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'config:update': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'match:start': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/start`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'location:update': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/location`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success) {
+              if (data.alert) setRecentAlert(data.alert);
+              if (data.room) applyRoomState(data.room);
+            }
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'catch:request_code': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/catch/request`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'catch:attempt_code': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/catch/attempt`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.room) applyRoomState(data.room);
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'mission:answer_landmark': {
+            const res = await fetch(`${backendUrl}/api/room/${code}/mission/clue`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'chat:send': {
+            const res = await fetch(`${backendUrl}/api/chat/send`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success && data.chatMessage) {
+              handleIncomingChatMessage(data.chatMessage);
+            }
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'radio:transmit': {
+            const res = await fetch(`${backendUrl}/api/radio/upload`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'voice:signal': {
+            await fetch(`${backendUrl}/api/voice/signal`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (callback) callback({ success: true });
+            return;
+          }
+
+          default:
+            dispatchEvent(event, payload);
+            if (callback) callback({ success: true });
+        }
+      } catch (err: any) {
+        console.error(`Error emitting ${event}:`, err);
+        if (callback) callback({ success: false, error: err.message });
+      }
+    },
+    [applyRoomState, dispatchEvent, handleIncomingChatMessage]
+  );
+
+  // Synthetic socket adapter providing standard .on, .off, .emit interface for hooks like useVoice
+  const socketAdapter = useRef({
+    id: playerId || 'player-socket',
+    connected: isConnected,
+    on: (evt: string, fn: (data: any) => void) => addListener(evt, fn),
+    off: (evt: string, fn: (data: any) => void) => removeListener(evt, fn),
+    emit: (evt: string, data?: any, cb?: (res: any) => void) => emit(evt, data, cb),
+  }).current;
+  socketAdapter.connected = isConnected;
+  socketAdapter.id = playerId || 'player-socket';
+
   const sendChatMessage = useCallback(
     (recipientTypeOrChannel: string, text: string, recipientId?: string) => {
       if (!roomCodeRef.current || !playerIdRef.current) return;
       emit('chat:send', {
         roomCode: roomCodeRef.current,
         senderId: playerIdRef.current,
+        senderNickname: nicknameRef.current || 'Agent',
         channelId: recipientTypeOrChannel,
         recipientType:
           recipientTypeOrChannel === 'DIRECT'
@@ -392,7 +601,6 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     [emit]
   );
 
-  // Mark chat as read (entirely or for specific channel)
   const markChatRead = useCallback((open: boolean = true, channelId?: string) => {
     isChatOpenRef.current = open;
     if (open) {
@@ -416,97 +624,91 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     setUnreadByChannel((prev) => ({ ...prev, [channelId]: 0 }));
   }, []);
 
-  // Measure round-trip ping latency
   const measurePing = useCallback(async () => {
-    const socket = socketRef.current;
-    if (!socket || !socket.connected) return null;
-
     const start = performance.now();
-    return new Promise<number>((resolve) => {
-      socket.emit('diagnostics:ping', { timestamp: Date.now() }, () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/health`);
+      if (res.ok) {
         const roundTrip = Math.round(performance.now() - start);
         setDiagnostics((prev) => ({ ...prev, latencyMs: roundTrip }));
-        resolve(roundTrip);
-      });
-
-      // Timeout fallback
-      setTimeout(() => {
-        resolve(-1);
-      }, 3000);
-    });
+        return roundTrip;
+      }
+    } catch {
+      // Ignore
+    }
+    return -1;
   }, []);
 
   const leaveRoom = useCallback(async () => {
-    const socket = socketRef.current;
-    if (!socket || !roomCode || !playerId) {
+    if (!roomCode || !playerId) {
       setRoomState(null);
       return true;
     }
     return new Promise<boolean>((resolve) => {
-      socket.emit('room:leave', { roomCode, playerId }, (res: any) => {
+      emit('room:leave', { roomCode, playerId }, (res: any) => {
         setRoomState(null);
         resolve(res?.success ?? true);
       });
-      setTimeout(() => {
-        setRoomState(null);
-        resolve(true);
-      }, 1500);
     });
-  }, [roomCode, playerId]);
+  }, [roomCode, playerId, emit]);
 
   const manualReconnect = useCallback(() => {
-    if (socketRef.current) {
-      setDiagnostics((prev) => ({
-        ...prev,
-        status: 'CONNECTING',
-        lastError: null,
-      }));
-      socketRef.current.disconnect();
-      socketRef.current.connect();
-    }
-  }, []);
+    setDiagnostics((prev) => ({ ...prev, status: 'CONNECTING', lastError: null }));
+    measurePing().then((ms) => {
+      if (ms >= 0) {
+        setIsConnected(true);
+        setDiagnostics((prev) => ({ ...prev, status: 'CONNECTED', latencyMs: ms }));
+      }
+    });
+  }, [measurePing]);
 
-  const requestCatchCode = useCallback(async (): Promise<{ success: boolean; catchCode?: string; expiresAt?: number; error?: string }> => {
-    const socket = socketRef.current;
-    if (!socket || !roomCode || !playerId) {
-      return { success: false, error: 'Not connected' };
-    }
+  const requestCatchCode = useCallback(async (): Promise<{
+    success: boolean;
+    catchCode?: string;
+    expiresAt?: number;
+    error?: string;
+  }> => {
+    if (!roomCode || !playerId) return { success: false, error: 'Not connected' };
     return new Promise((resolve) => {
-      socket.emit('catch:request_code', { roomCode, runnerId: playerId }, (res: any) => {
+      emit('catch:request_code', { roomCode, runnerId: playerId }, (res: any) => {
         resolve(res || { success: false, error: 'No response from server' });
       });
-      setTimeout(() => resolve({ success: false, error: 'Request timeout' }), 5000);
     });
-  }, [roomCode, playerId]);
+  }, [roomCode, playerId, emit]);
 
-  const submitCatchCode = useCallback(async (targetRunnerId: string, catchCode: string): Promise<{ success: boolean; error?: string; attempt?: any }> => {
-    const socket = socketRef.current;
-    if (!socket || !roomCode || !playerId) {
-      return { success: false, error: 'Not connected' };
-    }
-    return new Promise((resolve) => {
-      socket.emit('catch:attempt_code', { roomCode, chaserId: playerId, targetRunnerId, catchCode }, (res: any) => {
-        resolve(res || { success: false, error: 'No response from server' });
+  const submitCatchCode = useCallback(
+    async (
+      targetRunnerId: string,
+      catchCode: string
+    ): Promise<{ success: boolean; error?: string; attempt?: any }> => {
+      if (!roomCode || !playerId) return { success: false, error: 'Not connected' };
+      return new Promise((resolve) => {
+        emit(
+          'catch:attempt_code',
+          { roomCode, chaserId: playerId, targetRunnerId, catchCode },
+          (res: any) => {
+            resolve(res || { success: false, error: 'No response from server' });
+          }
+        );
       });
-      setTimeout(() => resolve({ success: false, error: 'Verification timeout' }), 5000);
-    });
-  }, [roomCode, playerId]);
+    },
+    [roomCode, playerId, emit]
+  );
 
-  const answerLandmarkClue = useCallback(async (answer: string): Promise<{ success: boolean; completed?: boolean; error?: string }> => {
-    const socket = socketRef.current;
-    if (!socket || !roomCode || !playerId) {
-      return { success: false, error: 'Not connected' };
-    }
-    return new Promise((resolve) => {
-      socket.emit('mission:answer_landmark', { roomCode, playerId, answer }, (res: any) => {
-        resolve(res || { success: false, error: 'No response from server' });
+  const answerLandmarkClue = useCallback(
+    async (answer: string): Promise<{ success: boolean; completed?: boolean; error?: string }> => {
+      if (!roomCode || !playerId) return { success: false, error: 'Not connected' };
+      return new Promise((resolve) => {
+        emit('mission:answer_landmark', { roomCode, runnerId: playerId, answer }, (res: any) => {
+          resolve(res || { success: false, error: 'No response from server' });
+        });
       });
-      setTimeout(() => resolve({ success: false, error: 'Request timeout' }), 5000);
-    });
-  }, [roomCode, playerId]);
+    },
+    [roomCode, playerId, emit]
+  );
 
   return {
-    socket: socketInstance || socketRef.current,
+    socket: socketAdapter as any,
     isConnected,
     roomState,
     roomJoinError,

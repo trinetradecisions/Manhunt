@@ -2,21 +2,20 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    const backendHost = process.env.BACKEND_HOST || 'http://localhost:4000';
-    return [
-      {
-        source: '/socket.io/:path*',
-        destination: `${backendHost}/socket.io/:path*`,
-      },
-      {
-        source: '/api/:path*',
-        destination: `${backendHost}/api/:path*`,
-      },
-      {
-        source: '/uploads/:path*',
-        destination: `${backendHost}/uploads/:path*`,
-      },
-    ];
+    // Only proxy if an external backend host is explicitly specified
+    if (process.env.BACKEND_HOST) {
+      return [
+        {
+          source: '/socket.io/:path*',
+          destination: `${process.env.BACKEND_HOST}/socket.io/:path*`,
+        },
+        {
+          source: '/uploads/:path*',
+          destination: `${process.env.BACKEND_HOST}/uploads/:path*`,
+        },
+      ];
+    }
+    return [];
   },
 };
 

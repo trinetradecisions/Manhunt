@@ -1,64 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "services": {
-    "client": {
-      "root": "client",
-      "framework": "nextjs",
-      "bindings": [
-        {
-          "type": "service",
-          "service": "server",
-          "format": "url",
-          "env": "SERVER_URL"
-        }
-      ]
-    },
-    "server": {
-      "root": "server/",
-      "entrypoint": "index.js"
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api",
-      "destination": {
-        "service": "server",
-        "path": "/api"
-      }
-    },
-    {
-      "source": "/api/(.*)",
-      "destination": {
-        "service": "server",
-        "path": "/api/$1"
-      }
-    },
-    {
-      "source": "/socket.io",
-      "destination": {
-        "service": "server",
-        "path": "/socket.io"
-      }
-    },
-    {
-      "source": "/socket.io/(.*)",
-      "destination": {
-        "service": "server",
-        "path": "/socket.io/$1"
-      }
-    },
-    {
-      "source": "/health",
-      "destination": {
-        "service": "server",
-        "path": "/health"
-      }
-    },
-    {
-      "source": "/(.*)",
-      "destination": {
-        "service": "client"
-      }
-    }
-  ]
+  "framework": "nextjs",
+  "buildCommand": "npm run build:client",
+  "outputDirectory": "client/.next"
 }
