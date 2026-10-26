@@ -19,6 +19,10 @@ export async function POST(
       return jsonResponse({ success: false, error: 'Chaser ID, Runner ID, and Catch Code required' }, 400);
     }
 
+    if (body.existingRoom || body.room) {
+      await GameStateStore.hydrateRoom(body.existingRoom || body.room, chaserId);
+    }
+
     const res = await GameStateStore.attemptCatchWithCode(code, chaserId, runnerId, catchCode);
     if (!res.success) {
       return jsonResponse({ success: false, error: res.error }, 400);

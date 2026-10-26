@@ -32,6 +32,8 @@ import {
   Shield,
   Activity,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   RoomState,
@@ -179,6 +181,10 @@ export default function ActiveGameHUD({
   const [clueFeedback, setClueFeedback] = useState<string | null>(null);
   const [isSubmittingClue, setIsSubmittingClue] = useState(false);
 
+  // Responsive mobile collapse states
+  const [isSingleMissionCollapsed, setIsSingleMissionCollapsed] = useState(false);
+  const [isRadioDockExpanded, setIsRadioDockExpanded] = useState(true);
+
   // Victory modal dismissal
   const [victoryDismissed, setVictoryDismissed] = useState(false);
 
@@ -186,6 +192,20 @@ export default function ActiveGameHUD({
   const isHostOrReferee = myMember?.role === 'HOST' || myMember?.role === 'REFEREE';
   const isChaser = myMember?.team === 'CHASERS';
   const isRunner = myMember?.team === 'RUNNERS';
+
+  // Automatically retrieve valid catch code if runner is active and missing code
+  useEffect(() => {
+    if (
+      isRunner &&
+      !myMember?.isCaught &&
+      !localCatchCode &&
+      !myMember?.catchCode &&
+      onRequestCatchCode &&
+      !isRequestingCode
+    ) {
+      handleRequestNewCode();
+    }
+  }, [isRunner, myMember?.isCaught, localCatchCode, myMember?.catchCode]);
 
   // Dynamic safe play zone calculation
   const playZone = roomState.config.playZone;
@@ -569,7 +589,7 @@ export default function ActiveGameHUD({
           />
         ) : (
           isRunner && !myMember?.isCaught && activeMission && (
-            <div className="bg-[#1F2731]/95 border-2 border-[#FFB800] p-3 sm:p-3.5 rounded-2xl shadow-tactical-glow pointer-events-auto max-w-md w-full space-y-2 backdrop-blur-md">
+            <div className="bg-[#1F2731]/95 border-2 border-[#FFB800] p-2.5 sm:p-3.5 rounded-2xl shadow-tactical-glow pointer-events-auto max-w-md w-full space-y-2 backdrop-blur-md">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded-lg text-[9px] font-mono font-black uppercase bg-[#FFB800] text-black">
@@ -587,29 +607,43 @@ export default function ActiveGameHUD({
                     {activeMission.difficulty}
                   </span>
                 </div>
-                <span className="text-[10px] font-mono font-bold text-[#FFB800]">
-                  +{activeMission.rewardIndividual} Solo / +{activeMission.rewardTeam} Team
-                </span>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-mono font-bold text-white uppercase">{activeMission.title}</h4>
-                <p className="text-[11px] text-[#ECE8E1] font-mono leading-tight mt-0.5">{activeMission.description}</p>
-              </div>
-
-              {/* Objective Distance & GPS Status */}
-              {activeMission.targetLocation && (
-                <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
-                  <span className="text-[#A8B0BA] flex items-center gap-1">
-                    <Navigation className="w-3 h-3 text-[#FFB800]" />
-                    <span>Objective Target:</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold text-[#FFB800]">
+                    +{activeMission.rewardIndividual} Solo / +{activeMission.rewardTeam} Team
                   </span>
-                  <strong className="text-white font-mono">
-                    {myLocation
-                      ? `${Math.round(calculateHaversineDistance(myLocation.latitude, myLocation.longitude, activeMission.targetLocation.latitude ?? activeMission.targetLocation.lat, activeMission.targetLocation.longitude ?? activeMission.targetLocation.lng))}m away`
-                      : 'Searching GPS...'}
-                  </strong>
+                  <button
+                    type="button"
+                    onClick={() => setIsSingleMissionCollapsed(!isSingleMissionCollapsed)}
+                    className="p-1 rounded-lg bg-[#293440] text-[#A8B0BA] hover:text-white transition-colors"
+                    title={isSingleMissionCollapsed ? 'Expand Objective' : 'Collapse Objective'}
+                  >
+                    {isSingleMissionCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
+              </div>
+
+              {!isSingleMissionCollapsed && (
+                <>
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-white uppercase">{activeMission.title}</h4>
+                    <p className="text-[11px] text-[#ECE8E1] font-mono leading-tight mt-0.5">{activeMission.description}</p>
+                  </div>
+
+                  {/* Objective Distance & GPS Status */}
+                  {activeMission.targetLocation && (
+                    <div className="flex items-center justify-between text-[10px] font-mono bg-[#161E27] px-2.5 py-1.5 rounded-xl border border-[#3B4652]">
+                      <span className="text-[#A8B0BA] flex items-center gap-1">
+                        <Navigation className="w-3 h-3 text-[#FFB800]" />
+                        <span>Objective Target:</span>
+                      </span>
+                      <strong className="text-white font-mono">
+                        {myLocation
+                          ? `${Math.round(calculateHaversineDistance(myLocation.latitude, myLocation.longitude, activeMission.targetLocation.latitude ?? activeMission.targetLocation.lat, activeMission.targetLocation.longitude ?? activeMission.targetLocation.lng))}m away`
+                          : 'Searching GPS...'}
+                      </strong>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )
@@ -643,31 +677,43 @@ export default function ActiveGameHUD({
       )}
 
       {/* Bottom Tactical Controls Deck */}
-      <div className="absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-3 right-3 z-[450] flex flex-col gap-2 pointer-events-none max-w-md mx-auto">
+      <div className="absolute bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-2 right-2 sm:left-3 sm:right-3 z-[450] flex flex-col gap-1.5 sm:gap-2 pointer-events-none max-w-md mx-auto">
         {/* Runner Secret PIN Floating Bar (Docked at bottom above voice controls) */}
         {isRunner && !myMember?.isCaught && (
-          <div className="bg-[#1F2731]/95 backdrop-blur-md border border-[#39BDE8]/70 px-4 py-2 rounded-2xl shadow-runner-glow flex items-center justify-between gap-3 pointer-events-auto w-full">
-            <div className="flex items-center gap-3">
+          <div className="bg-[#1F2731]/95 backdrop-blur-md border border-[#39BDE8]/70 px-3 sm:px-4 py-2 rounded-2xl shadow-runner-glow flex items-center justify-between gap-2 sm:gap-3 pointer-events-auto w-full">
+            <div className="flex items-center gap-2 sm:gap-3">
               <div className="flex flex-col">
                 <span className="text-[10px] text-[#A8B0BA] font-mono uppercase font-bold tracking-wider">
                   Secret PIN:
                 </span>
-                <span className="font-mono text-2xl font-black text-[#39BDE8] tracking-widest leading-none">
-                  {localCatchCode || myMember?.catchCode || '----'}
+                <span className="font-mono text-xl sm:text-2xl font-black text-[#39BDE8] tracking-widest leading-none">
+                  {codeSecondsRemaining <= 0 && (localCatchCode || myMember?.catchCode) ? (
+                    <span className="text-[#FF4655]">EXPIRED</span>
+                  ) : (
+                    localCatchCode || myMember?.catchCode || (isRequestingCode ? '...' : '----')
+                  )}
                 </span>
               </div>
-              {codeSecondsRemaining > 0 && (
-                <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg border ${codeSecondsRemaining <= 5 ? 'text-[#FF4655] border-[#FF4655] animate-pulse' : 'text-[#39BDE8] border-[#39BDE8]/40'}`}>
+              {codeSecondsRemaining > 0 ? (
+                <span className={`text-[10px] sm:text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg border ${codeSecondsRemaining <= 15 ? 'text-[#FF4655] border-[#FF4655] animate-pulse' : 'text-[#39BDE8] border-[#39BDE8]/40'}`}>
                   {codeSecondsRemaining}s
                 </span>
+              ) : (
+                <button
+                  onClick={handleRequestNewCode}
+                  disabled={isRequestingCode}
+                  className="px-2 py-0.5 rounded-lg bg-[#FF4655]/20 border border-[#FF4655] text-[#FF4655] font-mono text-[10px] font-bold uppercase animate-pulse active:scale-95"
+                >
+                  {isRequestingCode ? 'Renewing...' : 'Renew PIN'}
+                </button>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 onClick={handleCopyCode}
                 title="Copy Catch PIN"
-                className="p-2.5 rounded-xl bg-[#293440] hover:bg-[#3B4652] border border-[#3B4652] text-[#ECE8E1] transition-colors active:scale-95"
+                className="p-2 sm:p-2.5 rounded-xl bg-[#293440] hover:bg-[#3B4652] border border-[#3B4652] text-[#ECE8E1] transition-colors active:scale-95"
               >
                 {copiedCode ? (
                   <Check className="w-4 h-4 text-[#39BDE8]" />
@@ -682,7 +728,7 @@ export default function ActiveGameHUD({
                     handleRequestNewCode();
                   }
                 }}
-                className="px-3 py-2 rounded-xl bg-[#39BDE8] hover:brightness-110 active:scale-95 text-[#0F1923] font-mono font-black text-xs uppercase shadow-md"
+                className="px-2.5 sm:px-3 py-2 rounded-xl bg-[#39BDE8] hover:brightness-110 active:scale-95 text-[#0F1923] font-mono font-black text-xs uppercase shadow-md shrink-0"
               >
                 Catch Screen
               </button>
@@ -715,7 +761,7 @@ export default function ActiveGameHUD({
                 setShowTagModal(true);
                 setTagError(null);
               }}
-              className="w-full min-h-[50px] bg-[#FF4655] hover:brightness-110 active:scale-98 text-white font-black px-6 py-3.5 rounded-2xl shadow-tactical-glow text-sm flex items-center justify-center gap-2 transition-all uppercase tracking-wider"
+              className="w-full min-h-[48px] sm:min-h-[50px] bg-[#FF4655] hover:brightness-110 active:scale-98 text-white font-black px-4 sm:px-6 py-3 rounded-2xl shadow-tactical-glow text-xs sm:text-sm flex items-center justify-center gap-2 transition-all uppercase tracking-wider"
             >
               <Zap className="w-4 h-4 fill-current" />
               <span>Tag Nearby Runner ({uncaughtRunners.length} left)</span>
@@ -725,7 +771,7 @@ export default function ActiveGameHUD({
 
         {/* REAL-TIME WEBRTC WALKIE-TALKIE PUSH-TO-TALK BAR */}
         {voice && myMember?.team !== 'NONE' && (
-          <div className="pointer-events-auto bg-[#1F2731] border border-[#3B4652] p-2.5 rounded-2xl shadow-2xl flex flex-col gap-2">
+          <div className="pointer-events-auto bg-[#1F2731]/95 backdrop-blur-md border border-[#3B4652] p-2 sm:p-2.5 rounded-2xl shadow-2xl flex flex-col gap-1.5 sm:gap-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Radio className="w-3.5 h-3.5 text-[#FF4655]" />
@@ -734,7 +780,7 @@ export default function ActiveGameHUD({
                 </span>
               </div>
 
-              <div className="flex items-center gap-1.5 text-[10px] font-mono">
+              <div className="flex items-center gap-1 sm:gap-1.5 text-[10px] font-mono">
                 {voice.activeVoiceChannel && (
                   voice.diagnostics?.status === 'CONNECTED' ? (
                     <span className="text-[10px] font-mono text-[#4CC38A] font-bold flex items-center gap-1">
@@ -757,7 +803,7 @@ export default function ActiveGameHUD({
                 <button
                   type="button"
                   onClick={() => setShowVoiceDiagnostics(true)}
-                  className="p-1.5 rounded-lg bg-[#293440] text-[#39BDE8] hover:text-white"
+                  className="p-1.5 rounded-lg bg-[#293440] text-[#39BDE8] hover:text-white transition-colors"
                   title="Voice Diagnostics"
                 >
                   <Activity className="w-3.5 h-3.5" />
@@ -768,7 +814,7 @@ export default function ActiveGameHUD({
                     <button
                       type="button"
                       onClick={voice.toggleMute}
-                      className="p-1.5 rounded-lg bg-[#293440] text-[#A8B0BA] hover:text-white"
+                      className="p-1.5 rounded-lg bg-[#293440] text-[#A8B0BA] hover:text-white transition-colors"
                       title={voice.isMuted ? 'Unmute' : 'Mute'}
                     >
                       {voice.isMuted ? (
@@ -780,64 +826,77 @@ export default function ActiveGameHUD({
                     <button
                       type="button"
                       onClick={voice.leaveVoiceChannel}
-                      className="p-1.5 rounded-lg bg-[#293440] text-[#FF4655] hover:text-white"
+                      className="p-1.5 rounded-lg bg-[#293440] text-[#FF4655] hover:text-white transition-colors"
                       title="Disconnect Radio"
                     >
                       <PhoneOff className="w-3.5 h-3.5" />
                     </button>
                   </>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsRadioDockExpanded(!isRadioDockExpanded)}
+                  className="p-1.5 rounded-lg bg-[#293440] text-[#A8B0BA] hover:text-white transition-colors"
+                  title={isRadioDockExpanded ? 'Collapse Radio' : 'Expand Radio'}
+                >
+                  {isRadioDockExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                </button>
               </div>
             </div>
 
-            {/* Radio Channel Quick Switcher */}
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() =>
-                  voice.activeVoiceChannel === 'SQUAD'
-                    ? voice.leaveVoiceChannel()
-                    : voice.joinVoiceChannel('SQUAD')
-                }
-                className={`flex-1 py-1 px-2 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all border ${
-                  voice.activeVoiceChannel === 'SQUAD'
-                    ? 'bg-[#4CC38A]/20 border-[#4CC38A] text-[#4CC38A]'
-                    : 'bg-[#293440] border-[#3B4652] text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                <span>Squad Radio</span>
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  voice.activeVoiceChannel === 'PUBLIC'
-                    ? voice.leaveVoiceChannel()
-                    : voice.joinVoiceChannel('PUBLIC')
-                }
-                className={`flex-1 py-1 px-2 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all border ${
-                  voice.activeVoiceChannel === 'PUBLIC'
-                    ? 'bg-[#4CC38A]/20 border-[#4CC38A] text-[#4CC38A]'
-                    : 'bg-[#293440] border-[#3B4652] text-[#A8B0BA] hover:text-white'
-                }`}
-              >
-                <span>Public Radio</span>
-              </button>
-            </div>
+            {isRadioDockExpanded && (
+              <>
+                {/* Radio Channel Quick Switcher */}
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      voice.activeVoiceChannel === 'SQUAD'
+                        ? voice.leaveVoiceChannel()
+                        : voice.joinVoiceChannel('SQUAD')
+                    }
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all border ${
+                      voice.activeVoiceChannel === 'SQUAD'
+                        ? 'bg-[#4CC38A]/20 border-[#4CC38A] text-[#4CC38A]'
+                        : 'bg-[#293440] border-[#3B4652] text-[#A8B0BA] hover:text-white'
+                    }`}
+                  >
+                    <span>Squad Radio</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      voice.activeVoiceChannel === 'PUBLIC'
+                        ? voice.leaveVoiceChannel()
+                        : voice.joinVoiceChannel('PUBLIC')
+                    }
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-1 transition-all border ${
+                      voice.activeVoiceChannel === 'PUBLIC'
+                        ? 'bg-[#4CC38A]/20 border-[#4CC38A] text-[#4CC38A]'
+                        : 'bg-[#293440] border-[#3B4652] text-[#A8B0BA] hover:text-white'
+                    }`}
+                  >
+                    <span>Public Radio</span>
+                  </button>
+                </div>
 
-            {/* Autoplay Blocked Banner */}
-            {voice.autoplayBlocked && (
-              <button
-                type="button"
-                onClick={voice.enableAudioPlayback}
-                className="w-full py-1.5 px-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 text-amber-300 font-mono text-[10px] rounded-xl font-bold flex items-center justify-center gap-1.5 animate-pulse transition-all shadow"
-              >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>Audio Blocked By Browser — Tap to Enable Playback</span>
-              </button>
+                {/* Autoplay Blocked Banner */}
+                {voice.autoplayBlocked && (
+                  <button
+                    type="button"
+                    onClick={voice.enableAudioPlayback}
+                    className="w-full py-1.5 px-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 text-amber-300 font-mono text-[10px] rounded-xl font-bold flex items-center justify-center gap-1.5 animate-pulse transition-all shadow"
+                  >
+                    <Volume2 className="w-3.5 h-3.5" />
+                    <span>Audio Blocked By Browser — Tap to Enable Playback</span>
+                  </button>
+                )}
+              </>
             )}
 
-            {/* PTT Action Trigger Button */}
-            {voice.activeVoiceChannel && (
+            {/* PTT Action Trigger Button OR Connect Button */}
+            {voice.activeVoiceChannel ? (
               <button
                 onPointerDown={(e) => {
                   try {
@@ -868,15 +927,28 @@ export default function ActiveGameHUD({
                 className={`w-full min-h-[48px] rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all select-none border active:scale-98 ${
                   voice.isTransmitting
                     ? 'bg-[#FF4655] text-white border-[#FF4655] shadow-tactical-glow animate-pulse'
-                    : 'bg-[#293440] border-[#3B4652] text-white hover:border-[#FF4655]'
+                    : voice.isMuted
+                    ? 'bg-[#293440] border-[#3B4652] text-[#A8B0BA]'
+                    : 'bg-[#4CC38A] text-[#0F1923] border-[#4CC38A] shadow-lime-glow hover:brightness-110'
                 }`}
               >
                 <Mic className="w-4 h-4" />
                 <span>
                   {voice.isTransmitting
                     ? 'TRANSMITTING LIVE...'
+                    : voice.isMuted
+                    ? 'RADIO MUTED (TAP MIC TO UNMUTE)'
                     : 'HOLD PTT TO TRANSMIT [SPACE / V / HOLD]'}
                 </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => voice.joinVoiceChannel('SQUAD')}
+                className="w-full min-h-[48px] rounded-xl font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all select-none bg-[#4CC38A] text-[#0F1923] border border-[#4CC38A] shadow-lime-glow hover:brightness-110 active:scale-98"
+              >
+                <Radio className="w-4 h-4" />
+                <span>CONNECT SQUAD RADIO</span>
               </button>
             )}
 

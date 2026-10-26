@@ -148,6 +148,8 @@ function getTempRoomPath(code: string): string {
 }
 
 export class GameStateStore {
+  private static failedCodeAttempts: Map<string, { count: number; lastAttempt: number }> = new Map();
+
   private static async getRawRoom(roomCode: string): Promise<ExtendedRoomState | null> {
     const code = roomCode.toUpperCase().trim();
 
@@ -804,12 +806,20 @@ export class GameStateStore {
 
     missionService.initializeSharedMissions(room);
 
+    const codeExpirySec = room.config.missions?.catchCodeExpirySeconds || 300;
     for (const m of Object.values(room.members)) {
       m.isCaught = false;
       m.isEliminated = false;
       delete m.caughtAt;
-      delete m.catchCode;
-      delete m.catchCodeExpiresAt;
+      if (m.team === 'RUNNERS') {
+        if (!m.catchCode || (m.catchCodeExpiresAt && m.catchCodeExpiresAt <= now)) {
+          m.catchCode = Math.floor(1000 + Math.random() * 9000).toString();
+          m.catchCodeExpiresAt = now + codeExpirySec * 1000;
+        }
+      } else {
+        delete m.catchCode;
+        delete m.catchCodeExpiresAt;
+      }
     }
 
     await this.saveRawRoom(room);
@@ -947,9 +957,15 @@ export class GameStateStore {
       return { success: false, error: 'Only active uncaught runners can generate catch codes' };
     }
 
+    const now = Date.now();
+    // Return existing code if still valid (stable code during validity window)
+    if (runner.catchCode && runner.catchCodeExpiresAt && runner.catchCodeExpiresAt > now) {
+      return { success: true, catchCode: runner.catchCode, expiresAt: runner.catchCodeExpiresAt };
+    }
+
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const expirySec = room.config.missions?.catchCodeExpirySeconds || 30;
-    const expiresAt = Date.now() + expirySec * 1000;
+    const expirySec = room.config.missions?.catchCodeExpirySeconds || 300;
+    const expiresAt = now + expirySec * 1000;
 
     runner.catchCode = code;
     runner.catchCodeExpiresAt = expiresAt;
@@ -963,7 +979,14 @@ export class GameStateStore {
     chaserId: string,
     runnerId: string,
     catchCode: string
-  ): Promise<{ success: boolean; catchAttempt?: CatchAttempt; room?: ExtendedRoomState; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    catchAttempt?: CatchAttempt;
+    catchResult?: { confirmed: boolean };
+    room?: ExtendedRoomState;
+    error?: string;
+    attemptsRemaining?: number;
+  }> {
     const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: 'Room not found' };
     if (room.state !== 'ACTIVE') return { success: false, error: 'Catches only allowed during active match' };
@@ -972,15 +995,40 @@ export class GameStateStore {
     const runner = room.members[runnerId];
 
     if (!chaser || chaser.team !== 'CHASERS') return { success: false, error: 'Only chasers can catch runners' };
-    if (!runner || runner.team !== 'RUNNERS') return { success: false, error: 'Target must be an active runner' };
-    if (runner.isCaught) return { success: false, error: 'Runner is already caught' };
+    if (!runner) return { success: false, error: 'Target runner not found' };
+    if (runner.isCaught || runner.isEliminated || runner.team !== 'RUNNERS') {
+      return { success: false, error: 'Runner is already caught or eliminated' };
+    }
 
     const now = Date.now();
+    const failKey = `${chaserId}:${runnerId}`;
+    const failInfo = this.failedCodeAttempts.get(failKey) || { count: 0, lastAttempt: 0 };
+
+    if (failInfo.count >= 3 && now - failInfo.lastAttempt < 30000) {
+      const waitSec = Math.ceil((30000 - (now - failInfo.lastAttempt)) / 1000);
+      return {
+        success: false,
+        error: `Too many failed attempts! Locked out for ${waitSec}s`,
+        attemptsRemaining: 0,
+      };
+    }
+
     if (!runner.catchCode || runner.catchCode !== catchCode.trim()) {
-      return { success: false, error: 'Incorrect Catch Code. Verification failed.' };
+      failInfo.count += 1;
+      failInfo.lastAttempt = now;
+      this.failedCodeAttempts.set(failKey, failInfo);
+      const remaining = Math.max(0, 3 - failInfo.count);
+      return {
+        success: false,
+        error: 'Incorrect Catch Code. Verification failed.',
+        attemptsRemaining: remaining,
+      };
     }
 
     if (runner.catchCodeExpiresAt && now > runner.catchCodeExpiresAt) {
+      failInfo.count += 1;
+      failInfo.lastAttempt = now;
+      this.failedCodeAttempts.set(failKey, failInfo);
       return { success: false, error: 'Catch Code has expired. Request a new code.' };
     }
 
@@ -996,7 +1044,10 @@ export class GameStateStore {
       }
     }
 
-    // Mark caught
+    // Clear failed attempts upon successful verification
+    this.failedCodeAttempts.delete(failKey);
+
+    // Mark caught atomically and immediately consume code
     runner.isCaught = true;
     runner.caughtAt = now;
     delete runner.catchCode;
@@ -1400,6 +1451,13 @@ export class GameStateStore {
           if (!existing.members[mId]) {
             existing.members[mId] = mData as PlayerMember;
             hasMissing = true;
+          } else {
+            // If incoming member has catchCode and existing lacks it (e.g. runner generated new code)
+            if ((mData as any).catchCode && !existing.members[mId].catchCode) {
+              existing.members[mId].catchCode = (mData as any).catchCode;
+              existing.members[mId].catchCodeExpiresAt = (mData as any).catchCodeExpiresAt;
+              hasMissing = true;
+            }
           }
         }
       }
@@ -1417,6 +1475,14 @@ export class GameStateStore {
       for (const [mId, mData] of Object.entries(existing.members)) {
         if (!mergedMembers[mId]) {
           mergedMembers[mId] = mData;
+        } else {
+          // CRITICAL: Preserve existing catchCode if incoming member lacks it!
+          // Client state from Chasers or non-owners has catchCode redacted (undefined).
+          // If server's existing record has an active catchCode, preserve it!
+          if (mData.catchCode && !mergedMembers[mId].catchCode) {
+            mergedMembers[mId].catchCode = mData.catchCode;
+            mergedMembers[mId].catchCodeExpiresAt = mData.catchCodeExpiresAt;
+          }
         }
       }
     }
@@ -1465,26 +1531,14 @@ export class GameStateStore {
       return { changed: false, version: room.version, needsHydration: true };
     }
 
-    if (sinceVersion && room.version <= sinceVersion) {
-      return { changed: false, version: room.version };
-    }
-
-
     const sanitizedRoom = this.sanitizeRoomForPlayer(room, playerId);
-
-    // Filter chat messages visible to this player
     const player = playerId ? room.members[playerId] : undefined;
-    const filteredChat = (room.chatMessages || []).filter((msg) => {
-      if (msg.channelId === 'PUBLIC' || msg.recipientType === 'ALL') return true;
-      if (player && msg.senderTeam === player.team) return true;
-      if (msg.recipientId && msg.recipientId === playerId) return true;
-      if (msg.senderId === playerId) return true;
-      return false;
-    });
 
-    // Filter voice signals directed to this player
+    // Filter voice signals directed to this player (within last 45s)
+    const now = Date.now();
     const filteredSignals = (room.voiceSignals || [])
       .filter((sig) => {
+        if (sig.timestamp && now - sig.timestamp > 45000) return false;
         const target = sig.toPlayerId || (sig as any).targetPlayerId;
         if (!target) return true;
         return target === playerId;
@@ -1513,6 +1567,28 @@ export class GameStateStore {
         }
       }
     }
+
+    if (sinceVersion && room.version <= sinceVersion) {
+      // If there are voice signals directed to this player, return them immediately
+      if (filteredSignals.length > 0) {
+        return {
+          changed: true,
+          version: room.version,
+          voiceSignals: filteredSignals,
+          voiceParticipants: visibleVoiceParticipants,
+        };
+      }
+      return { changed: false, version: room.version };
+    }
+
+    // Filter chat messages visible to this player
+    const filteredChat = (room.chatMessages || []).filter((msg) => {
+      if (msg.channelId === 'PUBLIC' || msg.recipientType === 'ALL') return true;
+      if (player && msg.senderTeam === player.team) return true;
+      if (msg.recipientId && msg.recipientId === playerId) return true;
+      if (msg.senderId === playerId) return true;
+      return false;
+    });
 
     return {
       changed: true,

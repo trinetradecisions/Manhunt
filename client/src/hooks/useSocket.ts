@@ -112,6 +112,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   playerIdRef.current = playerId;
   nicknameRef.current = nickname;
   roomStateRef.current = roomState;
+  const seenVoiceSignalIdsRef = useRef<Set<string>>(new Set());
 
   // Event listener registry for custom events (e.g., voice, alerts)
   const listenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
@@ -391,21 +392,29 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
               const latest = data.radioTransmissions[data.radioTransmissions.length - 1];
               setIncomingRadio(latest);
             }
+          }
 
-            if (data.voiceSignals && Array.isArray(data.voiceSignals)) {
-              data.voiceSignals.forEach((sig: any) => {
-                const normalized = {
-                  ...sig,
-                  senderId: sig.senderId || sig.fromPlayerId,
-                  targetPlayerId: sig.targetPlayerId || sig.toPlayerId,
-                };
-                dispatchEvent('voice:signal', normalized);
-              });
-            }
+          if (data.voiceSignals && Array.isArray(data.voiceSignals)) {
+            data.voiceSignals.forEach((sig: any) => {
+              const sigKey = sig.id || `${sig.senderId || sig.fromPlayerId}_${sig.type}_${sig.timestamp || ''}_${JSON.stringify(sig.payload || sig.signal || '')}`;
+              if (seenVoiceSignalIdsRef.current.has(sigKey)) return;
+              seenVoiceSignalIdsRef.current.add(sigKey);
+              if (seenVoiceSignalIdsRef.current.size > 200) {
+                const first = seenVoiceSignalIdsRef.current.values().next().value;
+                if (first) seenVoiceSignalIdsRef.current.delete(first);
+              }
 
-            if (data.voiceParticipants && Array.isArray(data.voiceParticipants)) {
-              dispatchEvent('voice:participants_sync', data.voiceParticipants);
-            }
+              const normalized = {
+                ...sig,
+                senderId: sig.senderId || sig.fromPlayerId,
+                targetPlayerId: sig.targetPlayerId || sig.toPlayerId,
+              };
+              dispatchEvent('voice:signal', normalized);
+            });
+          }
+
+          if (data.voiceParticipants && Array.isArray(data.voiceParticipants)) {
+            dispatchEvent('voice:participants_sync', data.voiceParticipants);
           }
         }
       } catch (err: any) {
@@ -714,7 +723,10 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             const res = await fetch(`${backendUrl}/api/room/${code}/catch/request`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current || undefined,
+              }),
             });
             const data = await res.json();
             if (callback) callback(data);
@@ -726,7 +738,10 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             const res = await fetch(`${backendUrl}/api/room/${code}/catch/attempt`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current || undefined,
+              }),
             });
             const data = await res.json();
             if (data.success && data.room) applyRoomState(data.room);

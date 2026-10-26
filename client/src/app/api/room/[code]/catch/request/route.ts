@@ -17,6 +17,10 @@ export async function POST(
       return jsonResponse({ success: false, error: 'Runner ID required' }, 400);
     }
 
+    if (body.existingRoom || body.room) {
+      await GameStateStore.hydrateRoom(body.existingRoom || body.room, runnerId);
+    }
+
     const res = await GameStateStore.requestCatchCode(code, runnerId);
     if (!res.success) {
       return jsonResponse({ success: false, error: res.error }, 400);

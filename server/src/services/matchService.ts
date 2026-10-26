@@ -159,15 +159,22 @@ export class MatchService {
     // Initialize individual runner missions
     this.missionService.initializeMatchMissions(room);
 
-    // Reset member caught states and setup individual head starts
+    const codeExpirySec = room.config.missions?.catchCodeExpirySeconds || 300;
     for (const m of Object.values(room.members)) {
       m.isCaught = false;
       m.isEliminated = false;
       delete m.caughtAt;
-      delete m.catchCode;
-      delete m.catchCodeExpiresAt;
-      if (m.team === 'RUNNERS' && room.config.individualHeadStarts?.[m.id]) {
-        m.individualHeadStartSeconds = room.config.individualHeadStarts[m.id];
+      if (m.team === 'RUNNERS') {
+        if (!m.catchCode || (m.catchCodeExpiresAt && m.catchCodeExpiresAt <= now)) {
+          m.catchCode = crypto.randomInt(1000, 10000).toString();
+          m.catchCodeExpiresAt = now + codeExpirySec * 1000;
+        }
+        if (room.config.individualHeadStarts?.[m.id]) {
+          m.individualHeadStartSeconds = room.config.individualHeadStarts[m.id];
+        }
+      } else {
+        delete m.catchCode;
+        delete m.catchCodeExpiresAt;
       }
     }
 
@@ -582,6 +589,15 @@ export class MatchService {
     }
 
     const now = Date.now();
+    // Return existing code if still valid (stable code during validity window)
+    if (runner.catchCode && runner.catchCodeExpiresAt && runner.catchCodeExpiresAt > now) {
+      return {
+        success: true,
+        catchCode: runner.catchCode,
+        expiresAt: runner.catchCodeExpiresAt,
+      };
+    }
+
     const lastRequest = this.catchCodeRequests.get(runnerId) || 0;
     // Rate-limit catch code generation to once every 3s
     if (now - lastRequest < 3000) {
@@ -590,7 +606,7 @@ export class MatchService {
     this.catchCodeRequests.set(runnerId, now);
 
     const code = crypto.randomInt(1000, 10000).toString();
-    const expirySec = room.config.missions?.catchCodeExpirySeconds || 30;
+    const expirySec = room.config.missions?.catchCodeExpirySeconds || 300;
     const expiresAt = now + expirySec * 1000;
 
     runner.catchCode = code;

@@ -167,6 +167,9 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
   const startTransmitting = useCallback(() => {
     if (isMuted || !activeChannelRef.current || isTransmittingRef.current) return;
 
+    // Proactively unlock any autoplay-blocked remote audio on user interaction
+    enableAudioPlayback();
+
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach((track) => {
         track.enabled = true;
@@ -185,7 +188,7 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
     playTacticalChirp('start');
     setIsTransmitting(true);
     isTransmittingRef.current = true;
-  }, [isMuted, socket, roomCode, playerId, playTacticalChirp]);
+  }, [isMuted, socket, roomCode, playerId, playTacticalChirp, enableAudioPlayback]);
 
   // Create Peer Connection with W3C Perfect Negotiation Pattern
   const setupPeerConnection = useCallback(
@@ -208,11 +211,17 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
       makingOfferRef.current.set(targetPlayerId, false);
       ignoreOfferRef.current.set(targetPlayerId, false);
 
-      // Add local audio track if available
-      if (localStreamRef.current) {
+      // Add local audio track if available, or create audio transceiver to ensure bidirectional media description
+      if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
         localStreamRef.current.getAudioTracks().forEach((track) => {
           pc.addTrack(track, localStreamRef.current!);
         });
+      } else {
+        try {
+          pc.addTransceiver('audio', { direction: 'sendrecv' });
+        } catch {
+          // Ignored
+        }
       }
 
       const updatePeerDiagnostic = () => {
@@ -288,7 +297,16 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
           audio = document.createElement('audio');
           audio.autoplay = true;
           (audio as any).playsInline = true;
-          audio.style.display = 'none';
+          audio.muted = false;
+          audio.volume = 1.0;
+          // Avoid display: none which pauses playback in mobile and modern browsers
+          audio.style.position = 'fixed';
+          audio.style.top = '-9999px';
+          audio.style.left = '-9999px';
+          audio.style.width = '1px';
+          audio.style.height = '1px';
+          audio.style.opacity = '0.01';
+          audio.style.pointerEvents = 'none';
           document.body.appendChild(audio);
           audioElementsRef.current.set(targetPlayerId, audio);
         }
@@ -357,6 +375,7 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
         });
 
         setMicPermission('granted');
+        enableAudioPlayback();
 
         // Leave existing channel/connections
         cleanupConnections();

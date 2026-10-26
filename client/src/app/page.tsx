@@ -569,7 +569,7 @@ export default function Home() {
   const isMatchCompleted = roomState.state === 'COMPLETED';
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden flex flex-col bg-background select-none">
+    <div className="relative w-full h-[100dvh] overflow-hidden flex flex-col bg-background select-none">
       {/* Toast Alert Banner */}
       {recentAlert && (
         <div className="absolute top-3 left-4 right-4 z-[900] flex justify-center pointer-events-auto">
