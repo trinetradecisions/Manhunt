@@ -7,15 +7,23 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { roomCode, senderId, targetPlayerId, channelId, signal } = body;
+    const { roomCode, senderId, targetPlayerId, channelId, signal, fromPlayerId, toPlayerId, existingRoom, room } = body;
+    const resolvedSender = senderId || fromPlayerId;
+    const resolvedTarget = targetPlayerId || toPlayerId;
 
-    if (!roomCode || !senderId || !signal) {
+    if (!roomCode || !resolvedSender || !signal) {
       return jsonResponse({ success: false, error: 'Room code, sender ID, and signal required' }, 400);
     }
 
+    if (existingRoom || room) {
+      await GameStateStore.hydrateRoom(existingRoom || room, resolvedSender);
+    }
+
     const res = await GameStateStore.recordVoiceSignal(roomCode, {
-      fromPlayerId: senderId,
-      toPlayerId: targetPlayerId,
+      senderId: resolvedSender,
+      fromPlayerId: resolvedSender,
+      targetPlayerId: resolvedTarget,
+      toPlayerId: resolvedTarget,
       channelId: channelId || 'SQUAD',
       signal,
     });

@@ -393,7 +393,18 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             }
 
             if (data.voiceSignals && Array.isArray(data.voiceSignals)) {
-              data.voiceSignals.forEach((sig: any) => dispatchEvent('voice:signal', sig));
+              data.voiceSignals.forEach((sig: any) => {
+                const normalized = {
+                  ...sig,
+                  senderId: sig.senderId || sig.fromPlayerId,
+                  targetPlayerId: sig.targetPlayerId || sig.toPlayerId,
+                };
+                dispatchEvent('voice:signal', normalized);
+              });
+            }
+
+            if (data.voiceParticipants && Array.isArray(data.voiceParticipants)) {
+              dispatchEvent('voice:participants_sync', data.voiceParticipants);
             }
           }
         }
@@ -783,12 +794,55 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             return;
           }
 
+          case 'voice:join': {
+            const res = await fetch(`${backendUrl}/api/voice/join`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current,
+              }),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'voice:leave': {
+            const res = await fetch(`${backendUrl}/api/voice/leave`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current,
+              }),
+            });
+            const data = await res.json();
+            if (callback) callback(data);
+            return;
+          }
+
+          case 'voice:speaking': {
+            await fetch(`${backendUrl}/api/voice/speaking`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current,
+              }),
+            }).catch(() => {});
+            return;
+          }
+
           case 'voice:signal': {
             await fetch(`${backendUrl}/api/voice/signal`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
+              body: JSON.stringify({
+                ...payload,
+                existingRoom: roomStateRef.current,
+              }),
+            }).catch(() => {});
             if (callback) callback({ success: true });
             return;
           }

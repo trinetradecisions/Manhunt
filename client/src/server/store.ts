@@ -21,6 +21,8 @@ import {
   RoomState,
   SharedMission,
   TacticalMarker,
+  VoiceChannelId,
+  VoiceParticipant,
 } from '../types/game';
 import {
   calculateHaversineDistance,
@@ -40,10 +42,13 @@ export interface ExtendedRoomState extends RoomState {
   updatedAt: number;
   chatMessages: ChatMessage[];
   radioTransmissions: RadioTransmission[];
+  voiceParticipants?: Record<string, VoiceParticipant>;
   voiceSignals: Array<{
     id: string;
     fromPlayerId: string;
+    senderId?: string;
     toPlayerId?: string;
+    targetPlayerId?: string;
     channelId: string;
     signal: any;
     timestamp: number;
@@ -387,6 +392,7 @@ export class GameStateStore {
       updatedAt: Date.now(),
       chatMessages: [],
       radioTransmissions: [],
+      voiceParticipants: {},
       voiceSignals: [],
     };
 
@@ -1142,31 +1148,172 @@ export class GameStateStore {
     return { success: true, transmission: record };
   }
 
-  public static async recordVoiceSignal(
+  public static async joinVoiceChannel(
     roomCode: string,
-    signalPayload: {
-      fromPlayerId: string;
-      toPlayerId?: string;
-      channelId: string;
-      signal: any;
+    playerId: string,
+    channelId: VoiceChannelId
+  ): Promise<{ success: boolean; participants?: VoiceParticipant[]; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const member = room.members[playerId];
+    if (!member) return { success: false, error: 'Player not in room' };
+
+    // Squad radio requires active squad assignment
+    if (channelId === 'SQUAD') {
+      if (member.team === 'NONE' && member.role !== 'REFEREE') {
+        return { success: false, error: 'Only assigned Runners or Chasers can join Squad Radio' };
+      }
     }
+
+    room.voiceParticipants = room.voiceParticipants || {};
+
+    const participant: VoiceParticipant = {
+      playerId,
+      nickname: member.nickname,
+      team: member.team,
+      isSpeaking: false,
+      isMuted: false,
+      channelId,
+      joinedAt: Date.now(),
+    };
+
+    room.voiceParticipants[playerId] = participant;
+
+    // Filter visible existing participants according to squad isolation rules
+    const visibleParticipants: VoiceParticipant[] = [];
+    for (const other of Object.values(room.voiceParticipants)) {
+      if (other.playerId === playerId) continue;
+      if (other.channelId !== channelId) continue;
+      const otherMember = room.members[other.playerId];
+      if (!otherMember) continue;
+
+      if (channelId === 'SQUAD') {
+        if (member.role !== 'REFEREE' && otherMember.role !== 'REFEREE') {
+          if (member.team === 'NONE' || member.team !== otherMember.team) {
+            continue;
+          }
+        }
+      }
+      visibleParticipants.push(other);
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'voice:user_joined', participant);
+
+    return { success: true, participants: visibleParticipants };
+  }
+
+  public static async leaveVoiceChannel(
+    roomCode: string,
+    playerId: string
   ): Promise<{ success: boolean; error?: string }> {
     const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: 'Room not found' };
 
+    if (room.voiceParticipants && room.voiceParticipants[playerId]) {
+      const channelId = room.voiceParticipants[playerId].channelId;
+      delete room.voiceParticipants[playerId];
+      await this.saveRawRoom(room);
+      await broadcastToRoom(room.roomCode, 'voice:user_left', { playerId, channelId });
+    }
+
+    return { success: true };
+  }
+
+  public static async setVoiceSpeaking(
+    roomCode: string,
+    playerId: string,
+    channelIdOrSpeaking: string | boolean,
+    maybeSpeaking?: boolean
+  ): Promise<{ success: boolean; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const channelId = typeof channelIdOrSpeaking === 'string' 
+      ? channelIdOrSpeaking 
+      : (room.voiceParticipants?.[playerId]?.channelId || 'PUBLIC');
+    const isSpeaking = typeof channelIdOrSpeaking === 'boolean' 
+      ? channelIdOrSpeaking 
+      : !!maybeSpeaking;
+
+    if (room.voiceParticipants && room.voiceParticipants[playerId]) {
+      room.voiceParticipants[playerId].isSpeaking = isSpeaking;
+      await this.saveRawRoom(room);
+      await broadcastToRoom(room.roomCode, 'voice:speaking_changed', {
+        playerId,
+        channelId,
+        isSpeaking,
+      });
+    }
+
+    return { success: true };
+  }
+
+  public static async recordVoiceSignal(
+    roomCode: string,
+    payloadOrSenderId: {
+      fromPlayerId?: string;
+      senderId?: string;
+      toPlayerId?: string;
+      targetPlayerId?: string;
+      channelId?: string;
+      signal: any;
+    } | string,
+    maybeTargetId?: string,
+    maybeSignal?: any,
+    maybeChannelId?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    let senderId: string | undefined;
+    let targetPlayerId: string | undefined;
+    let channelId: string | undefined;
+    let signal: any;
+
+    if (typeof payloadOrSenderId === 'string') {
+      senderId = payloadOrSenderId;
+      targetPlayerId = maybeTargetId;
+      signal = maybeSignal;
+      channelId = maybeChannelId || room.voiceParticipants?.[senderId]?.channelId || 'PUBLIC';
+    } else {
+      senderId = payloadOrSenderId.senderId || payloadOrSenderId.fromPlayerId;
+      targetPlayerId = payloadOrSenderId.targetPlayerId || payloadOrSenderId.toPlayerId;
+      channelId = payloadOrSenderId.channelId || (senderId ? room.voiceParticipants?.[senderId]?.channelId : undefined) || 'PUBLIC';
+      signal = payloadOrSenderId.signal;
+    }
+
+    if (!senderId) return { success: false, error: 'Sender ID required' };
+
+    const senderMember = room.members[senderId];
+    if (!senderMember) return { success: false, error: 'Sender not in room' };
+
+    // Squad isolation check
+    if (channelId === 'SQUAD' && targetPlayerId) {
+      const targetMember = room.members[targetPlayerId];
+      if (targetMember && senderMember.role !== 'REFEREE' && targetMember.role !== 'REFEREE') {
+        if (senderMember.team === 'NONE' || senderMember.team !== targetMember.team) {
+          return { success: false, error: 'Squad voice isolation violation: cannot signal across enemy teams' };
+        }
+      }
+    }
+
     const record = {
       id: 'sig_' + Math.random().toString(36).substring(2, 10),
-      fromPlayerId: signalPayload.fromPlayerId,
-      toPlayerId: signalPayload.toPlayerId,
-      channelId: signalPayload.channelId,
-      signal: signalPayload.signal,
+      senderId,
+      fromPlayerId: senderId,
+      targetPlayerId,
+      toPlayerId: targetPlayerId,
+      channelId,
+      signal,
       timestamp: Date.now(),
     };
 
     room.voiceSignals = room.voiceSignals || [];
     room.voiceSignals.push(record);
-    if (room.voiceSignals.length > 30) {
-      room.voiceSignals = room.voiceSignals.slice(-30);
+    if (room.voiceSignals.length > 50) {
+      room.voiceSignals = room.voiceSignals.slice(-50);
     }
 
     await this.saveRawRoom(room);
@@ -1282,6 +1429,7 @@ export class GameStateStore {
       updatedAt: Date.now(),
       chatMessages: roomState.chatMessages || existing?.chatMessages || [],
       radioTransmissions: roomState.radioTransmissions || existing?.radioTransmissions || [],
+      voiceParticipants: roomState.voiceParticipants || existing?.voiceParticipants || {},
       voiceSignals: roomState.voiceSignals || existing?.voiceSignals || [],
     };
 
@@ -1301,6 +1449,7 @@ export class GameStateStore {
     chatMessages?: ChatMessage[];
     radioTransmissions?: RadioTransmission[];
     voiceSignals?: any[];
+    voiceParticipants?: VoiceParticipant[];
     needsHydration?: boolean;
   }> {
     const room = await this.getRoom(roomCode);
@@ -1334,10 +1483,36 @@ export class GameStateStore {
     });
 
     // Filter voice signals directed to this player
-    const filteredSignals = (room.voiceSignals || []).filter((sig) => {
-      if (!sig.toPlayerId) return true;
-      return sig.toPlayerId === playerId;
-    });
+    const filteredSignals = (room.voiceSignals || [])
+      .filter((sig) => {
+        const target = sig.toPlayerId || (sig as any).targetPlayerId;
+        if (!target) return true;
+        return target === playerId;
+      })
+      .map((sig) => ({
+        ...sig,
+        senderId: (sig as any).senderId || sig.fromPlayerId,
+        targetPlayerId: (sig as any).targetPlayerId || sig.toPlayerId,
+      }));
+
+    // Filter voice participants visible to this player
+    const visibleVoiceParticipants: VoiceParticipant[] = [];
+    if (room.voiceParticipants) {
+      for (const [pId, part] of Object.entries(room.voiceParticipants)) {
+        if (part.channelId === 'PUBLIC') {
+          visibleVoiceParticipants.push(part);
+        } else if (part.channelId === 'SQUAD') {
+          const otherMember = room.members[pId];
+          if (
+            player?.role === 'REFEREE' ||
+            otherMember?.role === 'REFEREE' ||
+            (player && otherMember && player.team !== 'NONE' && player.team === otherMember.team)
+          ) {
+            visibleVoiceParticipants.push(part);
+          }
+        }
+      }
+    }
 
     return {
       changed: true,
@@ -1346,6 +1521,7 @@ export class GameStateStore {
       chatMessages: filteredChat,
       radioTransmissions: room.radioTransmissions || [],
       voiceSignals: filteredSignals,
+      voiceParticipants: visibleVoiceParticipants,
     };
   }
 

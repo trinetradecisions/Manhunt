@@ -469,11 +469,11 @@ export default function LobbyView({
       </header>
 
       {/* 2. Main Staging Viewport: 2-Column Tactical War-Room Layout */}
-      <div className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+      <div className="max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 flex-1">
         {/* Left Column: Personal Card, Play Area Strip, Command Deck, Team Decks */}
-        <div className="lg:col-span-8 flex flex-col gap-4">
+        <div className="lg:col-span-8 flex flex-col gap-3">
           {/* PERSONAL OPERATIVE IDENTITY CARD ("YOU") */}
-          <div className="bg-[#1F2731] border border-[#3B4652] rounded-3xl p-4 shadow-xl relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+          <div className="bg-[#1F2731] border border-[#3B4652] rounded-2xl p-3 sm:p-3.5 shadow-md relative overflow-hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div
               onClick={() => setSelectedDossierPlayerId(myPlayerId)}
               className="flex items-center gap-3 min-w-0 cursor-pointer group"
@@ -482,11 +482,11 @@ export default function LobbyView({
               <PlayerAvatar
                 nickname={myMember?.nickname || 'Operative'}
                 team={myMember?.team || 'NONE'}
-                size="lg"
+                size="md"
               />
               <div className="truncate">
                 <div className="flex items-center gap-2">
-                  <span className="text-base font-black text-white truncate font-mono group-hover:text-[#4CC38A] transition-colors">
+                  <span className="text-sm sm:text-base font-black text-white truncate font-mono group-hover:text-[#4CC38A] transition-colors">
                     {myMember?.nickname}
                   </span>
                   <span className="text-[10px] font-mono bg-[#4CC38A]/20 border border-[#4CC38A]/50 text-[#4CC38A] px-2 py-0.5 rounded-full font-bold">
@@ -545,7 +545,7 @@ export default function LobbyView({
                   }
                   onToggleReady(!myMember?.isReady);
                 }}
-                className={`min-h-[44px] px-5 py-2.5 rounded-2xl font-mono font-bold text-xs uppercase tracking-wider transition-all active:scale-95 border flex items-center justify-center gap-2 shadow-lg ${
+                className={`min-h-[40px] px-4 py-2 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition-all active:scale-95 border flex items-center justify-center gap-2 shadow ${
                   myMember?.isReady
                     ? 'bg-[#4CC38A]/20 border-[#4CC38A] text-[#4CC38A]'
                     : 'bg-[#293440] border-[#3B4652] text-[#A8B0BA] hover:text-white'
@@ -553,12 +553,12 @@ export default function LobbyView({
               >
                 {myMember?.isReady ? (
                   <>
-                    <Check className="w-4 h-4 text-[#4CC38A] stroke-[3]" />
+                    <Check className="w-3.5 h-3.5 text-[#4CC38A] stroke-[3]" />
                     <span>Ready Confirmed</span>
                   </>
                 ) : (
                   <>
-                    <Clock className="w-4 h-4 text-neutral-500" />
+                    <Clock className="w-3.5 h-3.5 text-neutral-500" />
                     <span>Mark Ready</span>
                   </>
                 )}
@@ -567,9 +567,9 @@ export default function LobbyView({
           </div>
 
           {/* PLAY AREA BOUNDARY STRIP */}
-          <div className="bg-[#1F2731] border border-[#3B4652] rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#293440] border border-[#3B4652] flex items-center justify-center text-[#4CC38A] shrink-0">
+          <div className="bg-[#1F2731] border border-[#3B4652] rounded-xl p-2.5 sm:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-[#293440] border border-[#3B4652] flex items-center justify-center text-[#4CC38A] shrink-0">
                 <Compass className="w-4 h-4" />
               </div>
               <div>
@@ -587,7 +587,7 @@ export default function LobbyView({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#A8B0BA] block font-mono">
-                  {roomState.config.playZone.markers?.length || 0} strategic checkpoints placed
+                  {roomState.config.playZone.bases?.length || 0} strategic bases placed
                 </span>
               </div>
             </div>
@@ -596,7 +596,7 @@ export default function LobbyView({
               <button
                 type="button"
                 onClick={() => setIsMapEditorOpen(true)}
-                className="min-h-[44px] px-3.5 py-1.5 bg-[#293440] hover:bg-[#3B4652] active:scale-95 border border-[#3B4652] rounded-xl text-xs font-mono font-bold text-[#ECE8E1] hover:text-white flex items-center justify-center gap-1.5 transition-all shadow"
+                className="min-h-[38px] px-3 py-1.5 bg-[#293440] hover:bg-[#3B4652] active:scale-95 border border-[#3B4652] rounded-xl text-xs font-mono font-bold text-[#ECE8E1] hover:text-white flex items-center justify-center gap-1.5 transition-all shadow"
               >
                 <PenTool className="w-3.5 h-3.5 text-[#39BDE8]" />
                 <span>Configure Area</span>
@@ -610,10 +610,10 @@ export default function LobbyView({
 
           {/* HOST COMMAND DECK (Count Stepper & Auto-Assign) */}
           {isHost && (
-            <div className="bg-[#1F2731] border border-[#3B4652] rounded-3xl p-4 shadow-lg space-y-3">
+            <div className="bg-[#1F2731] border border-[#3B4652] rounded-2xl p-3 shadow-md space-y-2.5">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-[#4CC38A]" />
+                <div className="flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-[#4CC38A]" />
                   <h3 className="font-bold text-xs uppercase tracking-wider text-white font-mono">
                     Host Team Balance Deck
                   </h3>
@@ -623,56 +623,58 @@ export default function LobbyView({
                 </span>
               </div>
 
-              {/* Chaser Desired Count Stepper */}
-              <div className="flex items-center justify-between bg-[#293440] border border-[#3B4652] rounded-2xl p-2.5">
-                <div>
-                  <span className="text-xs font-mono font-bold text-white block">
-                    Desired Chaser Count
-                  </span>
-                  <span className="text-[10px] text-[#A8B0BA] font-mono">
-                    Assigned: {chasers.length} / Target: {targetChasers}
-                  </span>
+              {/* Chaser Desired Count Stepper & Auto-Assign Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center justify-between bg-[#293440] border border-[#3B4652] rounded-xl px-2.5 py-1.5">
+                  <div>
+                    <span className="text-[11px] font-mono font-bold text-white block">
+                      Desired Chaser Count
+                    </span>
+                    <span className="text-[9px] text-[#A8B0BA] font-mono">
+                      Assigned: {chasers.length} / Target: {targetChasers}
+                    </span>
+                  </div>
+
+                  {/* Stepper Control */}
+                  <div className="flex items-center gap-1.5 bg-[#1F2731] border border-[#3B4652] rounded-xl p-0.5">
+                    <button
+                      onClick={() => onSetTargetChasers(Math.max(1, targetChasers - 1))}
+                      disabled={targetChasers <= 1}
+                      className="w-7 h-7 rounded-lg bg-[#293440] hover:bg-[#3B4652] disabled:opacity-30 text-white font-bold flex items-center justify-center text-xs active:scale-95 transition-all"
+                    >
+                      -
+                    </button>
+                    <span className="w-6 text-center font-mono font-black text-xs text-[#FF4655]">
+                      {targetChasers}
+                    </span>
+                    <button
+                      onClick={() =>
+                        onSetTargetChasers(
+                          Math.min(Math.max(1, totalOperatives - 1), targetChasers + 1)
+                        )
+                      }
+                      disabled={totalOperatives > 1 && targetChasers >= totalOperatives - 1}
+                      className="w-7 h-7 rounded-lg bg-[#293440] hover:bg-[#3B4652] disabled:opacity-30 text-white font-bold flex items-center justify-center text-xs active:scale-95 transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
 
-                {/* Stepper Control */}
-                <div className="flex items-center gap-2 bg-[#1F2731] border border-[#3B4652] rounded-2xl p-1">
-                  <button
-                    onClick={() => onSetTargetChasers(Math.max(1, targetChasers - 1))}
-                    disabled={targetChasers <= 1}
-                    className="w-8 h-8 rounded-xl bg-[#293440] hover:bg-[#3B4652] disabled:opacity-30 text-white font-bold flex items-center justify-center text-sm active:scale-95 transition-all"
-                  >
-                    -
-                  </button>
-                  <span className="w-8 text-center font-mono font-black text-sm text-[#FF4655]">
-                    {targetChasers}
-                  </span>
-                  <button
-                    onClick={() =>
-                      onSetTargetChasers(
-                        Math.min(Math.max(1, totalOperatives - 1), targetChasers + 1)
-                      )
-                    }
-                    disabled={totalOperatives > 1 && targetChasers >= totalOperatives - 1}
-                    className="w-8 h-8 rounded-xl bg-[#293440] hover:bg-[#3B4652] disabled:opacity-30 text-white font-bold flex items-center justify-center text-sm active:scale-95 transition-all"
-                  >
-                    +
-                  </button>
-                </div>
+                {/* Auto-Assign Action Button */}
+                <button
+                  onClick={handleAutoAssignClick}
+                  disabled={totalOperatives < 2}
+                  className="min-h-[40px] px-3 py-2 bg-[#293440] hover:bg-[#3B4652] active:scale-98 disabled:opacity-40 text-[#ECE8E1] border border-[#3B4652] rounded-xl text-xs font-bold font-mono uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow"
+                >
+                  <Shuffle className="w-3.5 h-3.5 text-[#4CC38A]" />
+                  <span>Auto-Assign ({targetChasers} Chaser{targetChasers > 1 ? 's' : ''})</span>
+                </button>
               </div>
-
-              {/* Auto-Assign Action Button */}
-              <button
-                onClick={handleAutoAssignClick}
-                disabled={totalOperatives < 2}
-                className="min-h-[44px] w-full py-2.5 bg-[#293440] hover:bg-[#3B4652] active:scale-98 disabled:opacity-40 text-[#ECE8E1] border border-[#3B4652] rounded-2xl text-xs font-bold font-mono uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow"
-              >
-                <Shuffle className="w-3.5 h-3.5 text-[#4CC38A]" />
-                <span>Auto-Assign Teams ({targetChasers} Chaser{targetChasers > 1 ? 's' : ''})</span>
-              </button>
 
               {/* Mismatch indicator */}
               {isChaserMismatch && totalOperatives >= 2 && (
-                <div className="bg-amber-950/40 border border-amber-600/50 p-2.5 rounded-2xl text-amber-300 text-[11px] font-mono flex items-center justify-between gap-2">
+                <div className="bg-amber-950/40 border border-amber-600/50 px-2.5 py-1.5 rounded-xl text-amber-300 text-[11px] font-mono flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     <span>Composition mismatch ({chasers.length} assigned vs {targetChasers} target)</span>
@@ -688,9 +690,9 @@ export default function LobbyView({
             </div>
           )}
 
-          {/* 3 TACTICAL TEAM STAGING DECKS */}
-          <div className="space-y-4">
-            {/* ZONE 1: WAITING ROOM / BENCH */}
+          {/* TACTICAL SQUAD STAGING DECKS */}
+          <div className="space-y-3">
+            {/* ZONE 1: WAITING ROOM / BENCH (Compact Horizontal Staging Bar) */}
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -698,30 +700,30 @@ export default function LobbyView({
               }}
               onDragLeave={() => setDragOverZone(null)}
               onDrop={(e) => handleDrop(e, 'NONE')}
-              className={`bg-[#1F2731] border rounded-3xl p-4 shadow-lg transition-all ${
+              className={`bg-[#1F2731] border rounded-2xl p-3 shadow-md transition-all ${
                 dragOverZone === 'NONE'
                   ? 'border-[#ECE8E1] bg-[#293440]'
                   : 'border-[#3B4652]'
               }`}
             >
-              <div className="flex items-center justify-between border-b border-[#3B4652] pb-2.5 mb-2.5">
+              <div className="flex items-center justify-between border-b border-[#3B4652] pb-1.5 mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#A8B0BA]" />
+                  <span className="w-2 h-2 rounded-full bg-[#A8B0BA]" />
                   <h3 className="font-bold text-xs uppercase tracking-wider text-[#ECE8E1] font-mono">
                     Waiting Room / Bench ({waitingPlayers.length})
                   </h3>
                 </div>
                 <span className="text-[10px] text-[#A8B0BA] font-mono font-bold uppercase">
-                  Unassigned
+                  Drag here to unassign
                 </span>
               </div>
 
               {waitingPlayers.length === 0 ? (
-                <p className="text-[11px] text-[#A8B0BA] italic py-2 text-center font-mono">
+                <p className="text-[11px] text-[#A8B0BA] italic py-1 text-center font-mono">
                   All operatives deployed to active squads.
                 </p>
               ) : (
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1">
                   {waitingPlayers.map((m) => (
                     <PlayerCard
                       key={m.id}
@@ -739,102 +741,109 @@ export default function LobbyView({
               )}
             </div>
 
-            {/* ZONE 2: RUNNERS SQUAD (Cyan Identity) */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOverZone('RUNNERS');
-              }}
-              onDragLeave={() => setDragOverZone(null)}
-              onDrop={(e) => handleDrop(e, 'RUNNERS')}
-              className={`bg-[#1F2731] border rounded-3xl p-4 shadow-lg transition-all ${
-                dragOverZone === 'RUNNERS'
-                  ? 'border-[#39BDE8] bg-[#39BDE8]/10'
-                  : 'border-[#3B4652]'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b border-[#3B4652] pb-2.5 mb-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#39BDE8] animate-pulse" />
-                  <h3 className="font-bold text-xs uppercase tracking-wider text-[#39BDE8] font-mono">
-                    Runners ({runners.length})
-                  </h3>
+            {/* SQUAD COLUMNS: RUNNERS VS CHASERS (Side-by-Side 2-Column Responsive Grid) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* ZONE 2: RUNNERS SQUAD (Cyan Identity) */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverZone('RUNNERS');
+                }}
+                onDragLeave={() => setDragOverZone(null)}
+                onDrop={(e) => handleDrop(e, 'RUNNERS')}
+                className={`bg-[#1F2731] border rounded-2xl p-3 shadow-lg flex flex-col transition-all ${
+                  dragOverZone === 'RUNNERS'
+                    ? 'border-[#39BDE8] bg-[#39BDE8]/10'
+                    : 'border-[#3B4652]'
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-[#3B4652] pb-1.5 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#39BDE8] animate-pulse" />
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-[#39BDE8] font-mono">
+                      Runners ({runners.length})
+                    </h3>
+                  </div>
+                  <span className="text-[10px] text-[#39BDE8] font-mono font-bold uppercase tracking-wider">
+                    Disperse &amp; Evade
+                  </span>
                 </div>
-                <span className="text-[10px] text-[#39BDE8] font-mono font-bold uppercase tracking-wider">
-                  Disperse &amp; Evade
-                </span>
+
+                {runners.length === 0 ? (
+                  <div className="flex-1 min-h-[110px] flex items-center justify-center p-3 border border-dashed border-[#3B4652] rounded-xl text-center">
+                    <p className="text-[11px] text-[#A8B0BA] italic font-mono">
+                      Drag operatives here to assign to Runners squad
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                    {runners.map((m) => (
+                      <PlayerCard
+                        key={m.id}
+                        member={m}
+                        myPlayerId={myPlayerId}
+                        hostId={roomState.hostId}
+                        isHost={isHost}
+                        onDragStart={handleDragStart}
+                        onAssignTeam={onAssignTeam}
+                        onSelectMobilePlayer={setSelectedMobilePlayerId}
+                        onSelectDossier={setSelectedDossierPlayerId}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {runners.length === 0 ? (
-                <p className="text-[11px] text-[#A8B0BA] italic py-2 text-center font-mono">
-                  No operatives assigned to Runners yet.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {runners.map((m) => (
-                    <PlayerCard
-                      key={m.id}
-                      member={m}
-                      myPlayerId={myPlayerId}
-                      hostId={roomState.hostId}
-                      isHost={isHost}
-                      onDragStart={handleDragStart}
-                      onAssignTeam={onAssignTeam}
-                      onSelectMobilePlayer={setSelectedMobilePlayerId}
-                      onSelectDossier={setSelectedDossierPlayerId}
-                    />
-                  ))}
+              {/* ZONE 3: CHASERS SQUAD (Crimson Identity) */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverZone('CHASERS');
+                }}
+                onDragLeave={() => setDragOverZone(null)}
+                onDrop={(e) => handleDrop(e, 'CHASERS')}
+                className={`bg-[#1F2731] border rounded-2xl p-3 shadow-lg flex flex-col transition-all ${
+                  dragOverZone === 'CHASERS'
+                    ? 'border-[#FF4655] bg-[#FF4655]/10'
+                    : 'border-[#3B4652]'
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-[#3B4652] pb-1.5 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#FF4655] animate-pulse" />
+                    <h3 className="font-bold text-xs uppercase tracking-wider text-[#FF4655] font-mono">
+                      Chasers ({chasers.length})
+                    </h3>
+                  </div>
+                  <span className="text-[10px] text-[#FF4655] font-mono font-bold uppercase tracking-wider">
+                    Hunt &amp; Apprehend
+                  </span>
                 </div>
-              )}
-            </div>
 
-            {/* ZONE 3: CHASERS SQUAD (Crimson Identity) */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOverZone('CHASERS');
-              }}
-              onDragLeave={() => setDragOverZone(null)}
-              onDrop={(e) => handleDrop(e, 'CHASERS')}
-              className={`bg-[#1F2731] border rounded-3xl p-4 shadow-lg transition-all ${
-                dragOverZone === 'CHASERS'
-                  ? 'border-[#FF4655] bg-[#FF4655]/10'
-                  : 'border-[#3B4652]'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b border-[#3B4652] pb-2.5 mb-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#FF4655] animate-pulse" />
-                  <h3 className="font-bold text-xs uppercase tracking-wider text-[#FF4655] font-mono">
-                    Chasers ({chasers.length})
-                  </h3>
-                </div>
-                <span className="text-[10px] text-[#FF4655] font-mono font-bold uppercase tracking-wider">
-                  Hunt &amp; Apprehend
-                </span>
+                {chasers.length === 0 ? (
+                  <div className="flex-1 min-h-[110px] flex items-center justify-center p-3 border border-dashed border-[#3B4652] rounded-xl text-center">
+                    <p className="text-[11px] text-[#A8B0BA] italic font-mono">
+                      Drag operatives here to assign to Chasers squad
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                    {chasers.map((m) => (
+                      <PlayerCard
+                        key={m.id}
+                        member={m}
+                        myPlayerId={myPlayerId}
+                        hostId={roomState.hostId}
+                        isHost={isHost}
+                        onDragStart={handleDragStart}
+                        onAssignTeam={onAssignTeam}
+                        onSelectMobilePlayer={setSelectedMobilePlayerId}
+                        onSelectDossier={setSelectedDossierPlayerId}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-
-              {chasers.length === 0 ? (
-                <p className="text-[11px] text-[#A8B0BA] italic py-2 text-center font-mono">
-                  No operatives assigned to Chasers yet.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {chasers.map((m) => (
-                    <PlayerCard
-                      key={m.id}
-                      member={m}
-                      myPlayerId={myPlayerId}
-                      hostId={roomState.hostId}
-                      isHost={isHost}
-                      onDragStart={handleDragStart}
-                      onAssignTeam={onAssignTeam}
-                      onSelectMobilePlayer={setSelectedMobilePlayerId}
-                      onSelectDossier={setSelectedDossierPlayerId}
-                    />
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -2327,51 +2336,62 @@ export default function LobbyView({
       )}
 
       {/* 8. Fixed Bottom Action Bar */}
-      <div className="fixed bottom-0 left-0 right-0 p-3 sm:p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-[#0F1923]/95 backdrop-blur-md border-t border-[#3B4652] flex gap-3 max-w-6xl mx-auto z-[500]">
-        <button
-          onClick={() => onToggleReady(!myMember?.isReady)}
-          className={`min-h-[48px] flex-1 py-3 rounded-2xl font-mono font-bold text-xs uppercase tracking-wider transition-all active:scale-95 border flex items-center justify-center gap-2 ${
-            myMember?.isReady
-              ? 'bg-[#293440] border-[#3B4652] text-[#ECE8E1]'
-              : 'bg-[#293440] border-[#4CC38A] text-[#4CC38A] hover:bg-[#4CC38A]/10'
-          }`}
-        >
-          {myMember?.isReady ? (
-            <>
-              <Check className="w-4 h-4 text-[#4CC38A] stroke-[3]" />
-              <span>Ready Confirmed</span>
-            </>
-          ) : (
-            <>
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Mark Ready</span>
-            </>
-          )}
-        </button>
-
-        {isHost && (
+      <div className="fixed bottom-0 left-0 right-0 bg-[#0F1923]/95 backdrop-blur-md border-t border-[#3B4652] z-[500] px-3 sm:px-4 py-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="max-w-6xl mx-auto flex items-center gap-3">
           <button
-            onClick={onStartMatch}
-            disabled={!canStart}
-            className={`min-h-[48px] flex-1 py-3 rounded-2xl font-mono font-black text-xs uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-2 ${
-              canStart
-                ? 'bg-[#FF4655] text-white shadow-tactical-glow hover:brightness-110'
-                : 'bg-[#293440] text-[#A8B0BA] cursor-not-allowed border border-[#3B4652]'
+            onClick={() => onToggleReady(!myMember?.isReady)}
+            className={`min-h-[44px] flex-1 py-2.5 rounded-2xl font-mono font-bold text-xs uppercase tracking-wider transition-all active:scale-95 border flex items-center justify-center gap-2 ${
+              myMember?.isReady
+                ? 'bg-[#293440] border-[#3B4652] text-[#ECE8E1]'
+                : 'bg-[#293440] border-[#4CC38A] text-[#4CC38A] hover:bg-[#4CC38A]/10'
             }`}
           >
-            {canStart ? (
+            {myMember?.isReady ? (
               <>
-                <Play className="w-4 h-4 fill-current" />
-                <span>Deploy Match</span>
+                <Check className="w-4 h-4 text-[#4CC38A] stroke-[3]" />
+                <span>Ready Confirmed</span>
               </>
             ) : (
               <>
-                <AlertCircle className="w-4 h-4" />
-                <span>Need 1v1 Min</span>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Mark Ready</span>
               </>
             )}
           </button>
-        )}
+
+          {!isHost && (
+            <div className="flex-1 hidden sm:flex items-center justify-center text-[11px] font-mono text-[#A8B0BA] bg-[#1F2731] border border-[#3B4652] rounded-2xl px-3 min-h-[44px]">
+              <span className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#FFB800] animate-pulse" />
+                <span>Awaiting Commander to Deploy</span>
+              </span>
+            </div>
+          )}
+
+          {isHost && (
+            <button
+              onClick={onStartMatch}
+              disabled={!canStart}
+              className={`min-h-[44px] flex-1 py-2.5 rounded-2xl font-mono font-black text-xs uppercase tracking-wider transition-all active:scale-95 flex items-center justify-center gap-2 ${
+                canStart
+                  ? 'bg-[#FF4655] text-white shadow-tactical-glow hover:brightness-110'
+                  : 'bg-[#293440] text-[#A8B0BA] cursor-not-allowed border border-[#3B4652]'
+              }`}
+            >
+              {canStart ? (
+                <>
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Deploy Match</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Need 1v1 Min</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 9. Host Play Area Interactive Map Editor Modal */}
@@ -2466,7 +2486,7 @@ function PlayerCard({
     <div
       draggable={isHost}
       onDragStart={(e) => onDragStart(e, member.id)}
-      className={`min-h-[54px] flex items-center justify-between p-2.5 rounded-2xl bg-[#293440] border border-[#3B4652] shadow-sm transition-all select-none ${
+      className={`min-h-[46px] flex items-center justify-between p-2 rounded-xl bg-[#293440] border border-[#3B4652] shadow-sm transition-all select-none ${
         isHost ? 'cursor-grab active:cursor-grabbing hover:border-neutral-500' : ''
       }`}
     >

@@ -482,21 +482,21 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
     };
 
     // Incoming WebRTC peer signal (offer, answer, ICE candidate) with Perfect Negotiation
-    const handleVoiceSignal = async ({
-      senderId,
-      channelId: sigChannel,
-      signal,
-    }: {
-      senderId: string;
-      channelId: VoiceChannelId;
-      signal: any;
-    }) => {
+    const handleVoiceSignal = async (payload: any) => {
+      const senderId = payload.senderId || payload.fromPlayerId;
+      const targetPlayerId = payload.targetPlayerId || payload.toPlayerId;
+      const sigChannel = payload.channelId;
+      const signal = payload.signal;
+
+      if (!senderId || senderId === playerId) return;
+      if (targetPlayerId && targetPlayerId !== playerId) return;
+
       const currentChan = activeChannelRef.current;
-      if (sigChannel !== currentChan) return;
+      if (sigChannel && sigChannel !== currentChan) return;
 
       let pc = peerConnectionsRef.current.get(senderId);
       if (!pc) {
-        pc = setupPeerConnection(senderId, sigChannel) || undefined;
+        pc = setupPeerConnection(senderId, (sigChannel || currentChan || 'SQUAD') as VoiceChannelId) || undefined;
       }
       if (!pc) return;
 
@@ -542,7 +542,7 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
                 roomCode,
                 senderId: playerId,
                 targetPlayerId: senderId,
-                channelId: sigChannel,
+                channelId: sigChannel || currentChan || 'SQUAD',
                 signal: { description: pc.localDescription },
               });
             }
@@ -567,16 +567,42 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
       }
     };
 
+    // Periodic synchronization of active voice participants
+    const handleParticipantsSync = (synced: VoiceParticipant[]) => {
+      const currentChan = activeChannelRef.current;
+      if (!currentChan) return;
+
+      const inChannel = synced.filter((p) => p.channelId === currentChan && p.playerId !== playerId);
+      setParticipants(inChannel);
+
+      inChannel.forEach((p) => {
+        if (!peerConnectionsRef.current.has(p.playerId)) {
+          setupPeerConnection(p.playerId, currentChan);
+        }
+      });
+
+      setSpeakingPlayerIds((prev) => {
+        const next = new Set(prev);
+        inChannel.forEach((p) => {
+          if (p.isSpeaking) next.add(p.playerId);
+          else next.delete(p.playerId);
+        });
+        return next;
+      });
+    };
+
     socket.on('voice:user_joined', handleUserJoined);
     socket.on('voice:user_left', handleUserLeft);
     socket.on('voice:speaking_changed', handleSpeakingChanged);
     socket.on('voice:signal', handleVoiceSignal);
+    socket.on('voice:participants_sync', handleParticipantsSync);
 
     return () => {
       socket.off('voice:user_joined', handleUserJoined);
       socket.off('voice:user_left', handleUserLeft);
       socket.off('voice:speaking_changed', handleSpeakingChanged);
       socket.off('voice:signal', handleVoiceSignal);
+      socket.off('voice:participants_sync', handleParticipantsSync);
     };
   }, [socket, setupPeerConnection, roomCode, playerId]);
 
