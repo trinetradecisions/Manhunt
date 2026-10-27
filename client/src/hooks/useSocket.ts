@@ -113,6 +113,8 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
   nicknameRef.current = nickname;
   roomStateRef.current = roomState;
   const seenVoiceSignalIdsRef = useRef<Set<string>>(new Set());
+  const fastSyncUntilRef = useRef<number>(0);
+  const triggerPollRef = useRef<(() => void) | null>(null);
 
   // Event listener registry for custom events (e.g., voice, alerts)
   const listenersRef = useRef<Map<string, Set<(data: any) => void>>>(new Map());
@@ -352,6 +354,31 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
     let mounted = true;
     let timer: NodeJS.Timeout | null = null;
 
+    const scheduleNext = (delayMs?: number) => {
+      if (!mounted) return;
+      if (timer) clearTimeout(timer);
+      const now = Date.now();
+      const isVoiceActive = now < fastSyncUntilRef.current;
+      const isMatchActive =
+        roomStateRef.current?.state === 'ACTIVE' || roomStateRef.current?.state === 'RUNNER_HEADSTART';
+
+      let nextDelay = delayMs;
+      if (typeof nextDelay !== 'number') {
+        if (isVoiceActive) {
+          nextDelay = 250;
+        } else {
+          const base = isMatchActive ? 1000 : 2000;
+          const jitter = Math.floor(Math.random() * 250);
+          nextDelay = base + jitter;
+        }
+      }
+      timer = setTimeout(pollSync, Math.max(50, nextDelay));
+    };
+
+    triggerPollRef.current = () => {
+      scheduleNext(60);
+    };
+
     const pollSync = async () => {
       try {
         const backendUrl = getBackendUrl();
@@ -394,7 +421,8 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
             }
           }
 
-          if (data.voiceSignals && Array.isArray(data.voiceSignals)) {
+          if (data.voiceSignals && Array.isArray(data.voiceSignals) && data.voiceSignals.length > 0) {
+            fastSyncUntilRef.current = Date.now() + 6000;
             data.voiceSignals.forEach((sig: any) => {
               const sigKey = sig.id || `${sig.senderId || sig.fromPlayerId}_${sig.type}_${sig.timestamp || ''}_${JSON.stringify(sig.payload || sig.signal || '')}`;
               if (seenVoiceSignalIdsRef.current.has(sigKey)) return;
@@ -423,12 +451,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
         }
       } finally {
         if (mounted) {
-          // Poll every 1s if match is active, 2s if in lobby with smart jitter to avoid concurrent stampedes
-          const isMatchActive =
-            roomStateRef.current?.state === 'ACTIVE' || roomStateRef.current?.state === 'RUNNER_HEADSTART';
-          const baseInterval = isMatchActive ? 1000 : 2000;
-          const jitter = Math.floor(Math.random() * 300);
-          timer = setTimeout(pollSync, baseInterval + jitter);
+          scheduleNext();
         }
       }
     };
@@ -437,6 +460,7 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
 
     return () => {
       mounted = false;
+      triggerPollRef.current = null;
       if (timer) clearTimeout(timer);
     };
   }, [roomCode, applyRoomState, dispatchEvent, handleIncomingChatMessage]);
@@ -850,6 +874,8 @@ export function useSocket(roomCode?: string, playerId?: string, nickname?: strin
           }
 
           case 'voice:signal': {
+            fastSyncUntilRef.current = Date.now() + 6000;
+            if (triggerPollRef.current) triggerPollRef.current();
             await fetch(`${backendUrl}/api/voice/signal`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },

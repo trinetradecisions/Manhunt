@@ -316,8 +316,36 @@ export default function ActiveGameHUD({
     }
   };
 
+  // Auto-select nearest or first uncaught runner when Tag Modal is opened
+  useEffect(() => {
+    if (showTagModal && uncaughtRunners.length > 0) {
+      if (!selectedRunnerId || !uncaughtRunners.some((r) => r.id === selectedRunnerId)) {
+        let bestId = uncaughtRunners[0].id;
+        if (myLocation) {
+          let minDistance = Infinity;
+          for (const r of uncaughtRunners) {
+            if (r.lastLocation) {
+              const d = calculateHaversineDistance(
+                myLocation.latitude,
+                myLocation.longitude,
+                r.lastLocation.latitude,
+                r.lastLocation.longitude
+              );
+              if (d < minDistance) {
+                minDistance = d;
+                bestId = r.id;
+              }
+            }
+          }
+        }
+        setSelectedRunnerId(bestId);
+      }
+    }
+  }, [showTagModal, uncaughtRunners, selectedRunnerId, myLocation]);
+
   const handleClaimTagWithCode = async () => {
-    if (!selectedRunnerId) {
+    const targetId = selectedRunnerId || (uncaughtRunners.length > 0 ? uncaughtRunners[0].id : '');
+    if (!targetId) {
       setTagError('Please select a target runner.');
       return;
     }
@@ -328,17 +356,18 @@ export default function ActiveGameHUD({
     setTagError(null);
     if (onSubmitCatchCode) {
       setIsVerifyingCode(true);
-      const res = await onSubmitCatchCode(selectedRunnerId, enteredCatchCode);
+      const res = await onSubmitCatchCode(targetId, enteredCatchCode);
       setIsVerifyingCode(false);
       if (!res.success) {
         setTagError(res.error || 'Verification failed');
         return;
       }
     } else {
-      onAttemptCatchWithCode(selectedRunnerId, enteredCatchCode);
+      onAttemptCatchWithCode(targetId, enteredCatchCode);
     }
     setShowTagModal(false);
     setEnteredCatchCode('');
+    setSelectedRunnerId('');
   };
 
   const handleSubmitClue = async () => {

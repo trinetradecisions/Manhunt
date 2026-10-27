@@ -171,9 +171,20 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
     enableAudioPlayback();
 
     if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((track) => {
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      audioTracks.forEach((track) => {
         track.enabled = true;
       });
+      const activeTrack = audioTracks[0];
+      if (activeTrack) {
+        for (const pc of peerConnectionsRef.current.values()) {
+          const senders = pc.getSenders();
+          const audioSender = senders.find((s) => s.track?.kind === 'audio' || s.track === null);
+          if (audioSender && audioSender.track !== activeTrack) {
+            audioSender.replaceTrack(activeTrack).catch(() => {});
+          }
+        }
+      }
     }
 
     if (socket && roomCode && playerId && activeChannelRef.current) {
@@ -312,6 +323,10 @@ export function useVoice({ socket, roomCode, playerId, myNickname }: UseVoicePro
         }
         audio.srcObject = stream;
         updatePeerDiagnostic();
+
+        event.track.onunmute = () => {
+          audio?.play().catch(() => {});
+        };
 
         const playPromise = audio.play();
         if (playPromise !== undefined) {

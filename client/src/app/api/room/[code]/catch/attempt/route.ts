@@ -15,17 +15,30 @@ export async function POST(
     const runnerId = body.runnerId || body.targetRunnerId;
     const catchCode = body.catchCode;
 
-    if (!chaserId || !runnerId || !catchCode) {
-      return jsonResponse({ success: false, error: 'Chaser ID, Runner ID, and Catch Code required' }, 400);
+    if (!chaserId || !runnerId) {
+      return jsonResponse({ success: false, error: 'Chaser ID and Runner ID required' }, 400);
     }
 
     if (body.existingRoom || body.room) {
       await GameStateStore.hydrateRoom(body.existingRoom || body.room, chaserId);
     }
 
-    const res = await GameStateStore.attemptCatchWithCode(code, chaserId, runnerId, catchCode);
+    let res;
+    if (catchCode && typeof catchCode === 'string' && catchCode.trim().length > 0) {
+      res = await GameStateStore.attemptCatchWithCode(code, chaserId, runnerId, catchCode);
+    } else {
+      res = await GameStateStore.attemptCatchProximity(code, chaserId, runnerId);
+    }
+
     if (!res.success) {
-      return jsonResponse({ success: false, error: res.error }, 400);
+      return jsonResponse(
+        {
+          success: false,
+          error: res.error,
+          attemptsRemaining: (res as any).attemptsRemaining,
+        },
+        400
+      );
     }
 
     return jsonResponse({

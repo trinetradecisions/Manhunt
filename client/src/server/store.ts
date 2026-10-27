@@ -94,6 +94,29 @@ function generateRoomCode(): string {
   return code;
 }
 
+export function computeDeterministicCatchCode(
+  roomCode: string,
+  runnerId: string,
+  timestamp: number,
+  windowSeconds: number = 300,
+  seed: number = 0
+): { code: string; expiresAt: number; windowIndex: number } {
+  const windowMs = Math.max(30, windowSeconds) * 1000;
+  const windowIndex = Math.floor(timestamp / windowMs);
+  const expiresAt = (windowIndex + 1) * windowMs;
+
+  const key = `${roomCode.toUpperCase().trim()}:${runnerId}:${windowIndex}:${seed}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    const char = key.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  const abs = Math.abs(hash);
+  const code = (1000 + (abs % 9000)).toString();
+  return { code, expiresAt, windowIndex };
+}
+
 function getDefaultConfig(initialLocation?: { latitude: number; longitude: number }): GameConfig {
   const hasLoc =
     initialLocation &&
@@ -807,15 +830,15 @@ export class GameStateStore {
     missionService.initializeSharedMissions(room);
 
     const codeExpirySec = room.config.missions?.catchCodeExpirySeconds || 300;
+    const seed = room.match?.startedAt || (room as any).createdAt || 12345;
     for (const m of Object.values(room.members)) {
       m.isCaught = false;
       m.isEliminated = false;
       delete m.caughtAt;
       if (m.team === 'RUNNERS') {
-        if (!m.catchCode || (m.catchCodeExpiresAt && m.catchCodeExpiresAt <= now)) {
-          m.catchCode = Math.floor(1000 + Math.random() * 9000).toString();
-          m.catchCodeExpiresAt = now + codeExpirySec * 1000;
-        }
+        const det = computeDeterministicCatchCode(room.roomCode, m.id, now, codeExpirySec, seed);
+        m.catchCode = det.code;
+        m.catchCodeExpiresAt = det.expiresAt;
       } else {
         delete m.catchCode;
         delete m.catchCodeExpiresAt;
@@ -963,15 +986,15 @@ export class GameStateStore {
       return { success: true, catchCode: runner.catchCode, expiresAt: runner.catchCodeExpiresAt };
     }
 
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
     const expirySec = room.config.missions?.catchCodeExpirySeconds || 300;
-    const expiresAt = now + expirySec * 1000;
+    const seed = room.match?.startedAt || (room as any).createdAt || 12345;
+    const det = computeDeterministicCatchCode(roomCode, runnerId, now, expirySec, seed);
 
-    runner.catchCode = code;
-    runner.catchCodeExpiresAt = expiresAt;
+    runner.catchCode = det.code;
+    runner.catchCodeExpiresAt = det.expiresAt;
 
     await this.saveRawRoom(room);
-    return { success: true, catchCode: code, expiresAt };
+    return { success: true, catchCode: det.code, expiresAt: det.expiresAt };
   }
 
   public static async attemptCatchWithCode(
@@ -989,7 +1012,16 @@ export class GameStateStore {
   }> {
     const room = await this.getRoom(roomCode);
     if (!room) return { success: false, error: 'Room not found' };
-    if (room.state !== 'ACTIVE') return { success: false, error: 'Catches only allowed during active match' };
+
+    // Update room progress in case headstart elapsed
+    this.updateRoomTimeProgress(room);
+
+    if (room.state !== 'ACTIVE') {
+      if (room.state === 'RUNNER_HEADSTART') {
+        return { success: false, error: 'Cannot catch runners during Head Start phase' };
+      }
+      return { success: false, error: 'Catches only allowed during active match' };
+    }
 
     const chaser = room.members[chaserId];
     const runner = room.members[runnerId];
@@ -1013,7 +1045,25 @@ export class GameStateStore {
       };
     }
 
-    if (!runner.catchCode || runner.catchCode !== catchCode.trim()) {
+    const trimmedInput = catchCode.trim();
+    const expirySec = room.config.missions?.catchCodeExpirySeconds || 300;
+    const seed = room.match?.startedAt || (room as any).createdAt || 12345;
+    const currentDet = computeDeterministicCatchCode(roomCode, runnerId, now, expirySec, seed);
+    const prevDet = computeDeterministicCatchCode(roomCode, runnerId, now - 60000, expirySec, seed);
+
+    if (runner.catchCodeExpiresAt && now > runner.catchCodeExpiresAt) {
+      failInfo.count += 1;
+      failInfo.lastAttempt = now;
+      this.failedCodeAttempts.set(failKey, failInfo);
+      return { success: false, error: 'Catch Code has expired. Request a new code.' };
+    }
+
+    const isMatch =
+      (runner.catchCode && runner.catchCode === trimmedInput) ||
+      currentDet.code === trimmedInput ||
+      prevDet.code === trimmedInput;
+
+    if (!isMatch) {
       failInfo.count += 1;
       failInfo.lastAttempt = now;
       this.failedCodeAttempts.set(failKey, failInfo);
@@ -1023,13 +1073,6 @@ export class GameStateStore {
         error: 'Incorrect Catch Code. Verification failed.',
         attemptsRemaining: remaining,
       };
-    }
-
-    if (runner.catchCodeExpiresAt && now > runner.catchCodeExpiresAt) {
-      failInfo.count += 1;
-      failInfo.lastAttempt = now;
-      this.failedCodeAttempts.set(failKey, failInfo);
-      return { success: false, error: 'Catch Code has expired. Request a new code.' };
     }
 
     // Optional GPS proximity check if configured
@@ -1090,6 +1133,113 @@ export class GameStateStore {
       }
 
       // Check if all runners caught
+      const uncaughtRemaining = Object.values(room.members).filter(
+        (m) => m.team === 'RUNNERS' && !m.isCaught && !m.isEliminated
+      );
+
+      if (uncaughtRemaining.length === 0 && room.config.missions?.earlyEndAllRunnersCaught !== false) {
+        room.state = 'COMPLETED';
+        if (room.match) {
+          room.match.winnerTeam = 'CHASERS';
+          room.match.victoryReason = 'ALL RUNNERS ELIMINATED — Chasers apprehended every target!';
+          if (room.match.scoreLedger) {
+            scoringService.resolveWinnerBonuses(
+              room.match.scoreLedger,
+              'CHASERS',
+              room.members,
+              room.config.missions || missionService.getDefaultConfig()
+            );
+          }
+          await broadcastToRoom(room.roomCode, 'match:victory', {
+            winnerTeam: 'CHASERS',
+            reason: room.match.victoryReason,
+            summary: room.match,
+          });
+        }
+      }
+    }
+
+    await this.saveRawRoom(room);
+    await broadcastToRoom(room.roomCode, 'catch:confirmed', catchAttempt);
+    await broadcastToRoom(room.roomCode, 'room:update', room);
+
+    return { success: true, catchAttempt, room };
+  }
+
+  public static async attemptCatchProximity(
+    roomCode: string,
+    chaserId: string,
+    runnerId: string
+  ): Promise<{
+    success: boolean;
+    catchAttempt?: CatchAttempt;
+    room?: ExtendedRoomState;
+    error?: string;
+  }> {
+    const room = await this.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    this.updateRoomTimeProgress(room);
+    if (room.state !== 'ACTIVE') {
+      if (room.state === 'RUNNER_HEADSTART') {
+        return { success: false, error: 'Cannot catch runners during Head Start phase' };
+      }
+      return { success: false, error: 'Catches only allowed during active match' };
+    }
+
+    const chaser = room.members[chaserId];
+    const runner = room.members[runnerId];
+
+    if (!chaser || chaser.team !== 'CHASERS') return { success: false, error: 'Only chasers can catch runners' };
+    if (!runner) return { success: false, error: 'Target runner not found' };
+    if (runner.isCaught || runner.isEliminated || runner.team !== 'RUNNERS') {
+      return { success: false, error: 'Runner is already caught or eliminated' };
+    }
+
+    if (!chaser.lastLocation || !runner.lastLocation) {
+      return { success: false, error: 'GPS location required for both players to verify proximity' };
+    }
+
+    const maxDistance = room.config.catchProximityThresholdMeters || 25;
+    const validation = validateCatchProximity(chaser.lastLocation, runner.lastLocation, maxDistance);
+    if (!validation.isValid) {
+      return { success: false, error: `Distance is ${Math.round(validation.rawDistance)}m (Max allowed: ${maxDistance}m)` };
+    }
+
+    const now = Date.now();
+    runner.isCaught = true;
+    runner.caughtAt = now;
+    delete runner.catchCode;
+    delete runner.catchCodeExpiresAt;
+
+    if (room.config.missions?.caughtRunnerRule === 'CONVERT_TO_CHASER') {
+      runner.team = 'CHASERS';
+      runner.role = 'CHASER';
+    } else {
+      runner.isEliminated = true;
+    }
+
+    const catchAttempt: CatchAttempt = {
+      id: 'catch_' + Math.random().toString(36).substring(2, 10),
+      chaserId: chaser.id,
+      chaserNickname: chaser.nickname,
+      runnerId: runner.id,
+      runnerNickname: runner.nickname,
+      distanceMeters: Math.round(validation.rawDistance),
+      timestamp: now,
+      status: 'CONFIRMED',
+      verificationType: 'PROXIMITY_CONFIRMED',
+      resolvedBy: chaser.nickname,
+    };
+
+    if (room.match) {
+      room.match.catches = room.match.catches || [];
+      room.match.catches.push(catchAttempt);
+
+      if (room.match.scoreLedger) {
+        scoringService.resolveCatchReward(room.match.scoreLedger, chaser, runner, room.config.missions || missionService.getDefaultConfig());
+      }
+
       const uncaughtRemaining = Object.values(room.members).filter(
         (m) => m.team === 'RUNNERS' && !m.isCaught && !m.isEliminated
       );

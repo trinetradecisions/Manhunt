@@ -179,4 +179,57 @@ describe('Authoritative Catch-Code Verification, Stability & Anti-Tamper', () =>
     const finalRoom = await GameStateStore.getRoom(roomCode);
     expect(finalRoom?.members['runner_1'].isCaught).toBe(true);
   });
+
+  it('correctly confirms catches on cold serverless Lambdas when memory is unpopulated and runner catchCode was redacted', async () => {
+    // 1. Runner requests catch code on Lambda A
+    const room = await GameStateStore.createRoom({
+      id: 'chaser_alpha',
+      nickname: 'Alpha',
+      role: 'HOST',
+      team: 'CHASERS',
+    });
+    const code = room.roomCode;
+    await GameStateStore.joinRoom(code, {
+      id: 'runner_bravo',
+      nickname: 'Bravo',
+      role: 'RUNNER',
+      team: 'RUNNERS',
+    });
+    await GameStateStore.startMatch(code, 'chaser_alpha');
+    const runnerCodeRes = await GameStateStore.requestCatchCode(code, 'runner_bravo');
+    expect(runnerCodeRes.success).toBe(true);
+    const displayedCodeOnRunnerScreen = runnerCodeRes.catchCode!;
+    expect(displayedCodeOnRunnerScreen).toMatch(/^\d{4}$/);
+
+    // 2. Chaser's client only has the sanitized room (anti-cheat strips runner catchCode)
+    const currentRoom = await GameStateStore.getRoom(code);
+    expect(currentRoom).toBeDefined();
+    currentRoom!.state = 'ACTIVE';
+    if (currentRoom!.match) {
+      currentRoom!.match.headStartEndsAt = Date.now() - 1000;
+      currentRoom!.match.gameStartedAt = Date.now() - 1000;
+    }
+    await (GameStateStore as any).saveRawRoom(currentRoom);
+    const sanitizedChaserView = GameStateStore.sanitizeRoomForPlayer(currentRoom!, 'chaser_alpha');
+    expect(sanitizedChaserView.members['runner_bravo'].catchCode).toBeUndefined();
+
+    // 3. Simulate Lambda B: completely wipe memoryStore to simulate fresh serverless container
+    (globalThis as any).__MANHUNT_MEMORY_STORE__?.clear();
+
+    // 4. Lambda B hydrates ONLY from the sanitized room sent by Chaser
+    await GameStateStore.hydrateRoom(sanitizedChaserView, 'chaser_alpha');
+
+    // 5. Chaser submits the code shown on runner's screen to Lambda B
+    const catchRes = await GameStateStore.attemptCatchWithCode(
+      code,
+      'chaser_alpha',
+      'runner_bravo',
+      displayedCodeOnRunnerScreen
+    );
+
+    // Verification must succeed authoritatively despite sanitized state on cold lambda!
+    expect(catchRes.success).toBe(true);
+    expect(catchRes.catchAttempt?.status).toBe('CONFIRMED');
+    expect(catchRes.room?.members['runner_bravo'].isCaught).toBe(true);
+  });
 });
